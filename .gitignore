@@ -1,0 +1,20 @@
+# Build / packaging artifacts (never commit; CI regenerates them)
+packaging/.buildenv/
+packaging/build/
+packaging/dist/
+packaging/Output/
+src/build/
+*.egg-info/
+.venv/
+.buildenv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local runtime output (web.py session dir, when run from a checkout)
+outputs/
+
+# Env / secrets — never commit real keys
+.env

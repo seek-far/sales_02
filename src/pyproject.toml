@@ -1,0 +1,36 @@
+[project]
+name = "sales-retro-agent"
+version = "0.1.0"
+description = "DeepSeek-powered sales call review agent for transcript retrospectives."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "openai>=1.60.0",
+  "python-dotenv>=1.0.1",
+  "soundfile>=0.12.1",
+  "websockets>=15.0"
+]
+
+[project.optional-dependencies]
+# Microphone capture (CLI realtime path) needs PortAudio via sounddevice.
+# The thin web backend does NOT need this; keep it out of the base install
+# so packaging can skip the PortAudio native dependency.
+mic = [
+  "sounddevice>=0.4.7"
+]
+test = [
+  "pytest>=8.0.0"
+]
+
+[build-system]
+requires = ["setuptools>=69.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["sales_retro_agent*"]
+exclude = ["samples*", "tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

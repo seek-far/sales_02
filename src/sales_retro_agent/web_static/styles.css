@@ -1,0 +1,355 @@
+:root {
+  color-scheme: light;
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --ink: #17202a;
+  --muted: #667085;
+  --line: #d8dee8;
+  --accent: #117a65;
+  --accent-dark: #0b5c4b;
+  --danger: #b42318;
+  --soft: #eef6f3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  min-height: 38px;
+  padding: 0 14px;
+}
+
+button:hover {
+  background: var(--accent-dark);
+}
+
+button.secondary {
+  background: #e9eef5;
+  color: var(--ink);
+}
+
+button.danger {
+  background: var(--danger);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button:disabled:hover {
+  background: var(--accent);
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.topbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 30px;
+  letter-spacing: 0;
+}
+
+h2 {
+  font-size: 16px;
+}
+
+.topbar p,
+.hint,
+label {
+  color: var(--muted);
+}
+
+.session-pill {
+  background: var(--soft);
+  border: 1px solid #b8ded2;
+  border-radius: 999px;
+  color: var(--accent-dark);
+  padding: 8px 12px;
+}
+
+.top-actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.text-link {
+  color: var(--accent-dark);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(260px, 320px) minmax(360px, 1fr) minmax(280px, 380px);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.panel-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.config-panel,
+.log-panel {
+  align-self: start;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+
+input,
+select,
+textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  min-height: 40px;
+  padding: 9px 10px;
+  width: 100%;
+}
+
+textarea {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.wide {
+  width: 100%;
+}
+
+.mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tab {
+  background: #e9eef5;
+  color: var(--ink);
+}
+
+.tab.active {
+  background: var(--accent);
+  color: white;
+}
+
+.mode-panel {
+  display: none;
+  margin-bottom: 16px;
+}
+
+.mode-panel.active {
+  display: block;
+}
+
+.record-stage {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+}
+
+.record-button {
+  aspect-ratio: 1;
+  border-radius: 999px;
+  font-weight: 700;
+  min-height: 112px;
+  width: 112px;
+}
+
+.record-button.recording {
+  background: var(--danger);
+}
+
+.meters {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+#liveTranscriptInput {
+  margin-top: 16px;
+}
+
+.meters div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.meters span {
+  color: var(--muted);
+  display: block;
+  font-size: 13px;
+}
+
+.meters strong {
+  display: block;
+  font-size: 24px;
+  margin-top: 4px;
+}
+
+.drop-zone {
+  align-items: center;
+  border: 1px dashed #9aa8ba;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  min-height: 120px;
+  text-align: center;
+}
+
+.drop-zone input {
+  display: none;
+}
+
+.alerts {
+  display: grid;
+  gap: 10px;
+}
+
+.alerts.empty {
+  color: var(--muted);
+}
+
+.alert-card {
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.alert-card strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.alert-card small {
+  color: var(--muted);
+  display: block;
+  line-height: 1.5;
+  margin-top: 6px;
+}
+
+#logOutput {
+  background: #101828;
+  border-radius: 8px;
+  color: #d1fadf;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 58vh;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+dialog {
+  border: 0;
+  border-radius: 10px;
+  padding: 0;
+  width: min(620px, calc(100vw - 24px));
+}
+
+dialog::backdrop {
+  background: rgb(16 24 40 / 60%);
+}
+
+.modal {
+  padding: 18px;
+}
+
+menu {
+  display: flex;
+  justify-content: flex-end;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+@media (max-width: 1120px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  .log-panel {
+    order: 3;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .topbar,
+  .top-actions,
+  .record-stage,
+  .row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mode-tabs {
+    overflow-x: auto;
+  }
+}

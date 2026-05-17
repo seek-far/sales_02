@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sales Copilot - 后台代理版</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="topbar">
+        <div>
+          <h1>Sales Copilot</h1>
+          <p>前台 + 薄后台代理版</p>
+        </div>
+        <div class="top-actions">
+          <a class="text-link" href="./index.html">纯前端版</a>
+          <div class="session-pill" id="sessionLabel">未开始</div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <aside class="panel config-panel">
+          <div class="panel-head">
+            <h2>基本配置</h2>
+            <button class="icon-button" id="saveConfigButton" title="保存配置">保存</button>
+          </div>
+
+          <label>
+            提示词
+            <textarea id="promptInput" rows="7" placeholder="导入或粘贴你的 Copilot 提示词"></textarea>
+          </label>
+          <div class="row">
+            <input id="promptFileInput" type="file" accept=".txt,.md,.prompt" hidden />
+            <button id="importPromptButton">导入提示词</button>
+            <button id="clearPromptButton" class="secondary">清空</button>
+          </div>
+
+          <label>
+            上传/评估间隔
+            <select id="intervalInput">
+              <option value="30">30 秒</option>
+              <option value="60" selected>1 分钟</option>
+              <option value="120">2 分钟</option>
+              <option value="300">5 分钟</option>
+            </select>
+          </label>
+
+          <label>
+            Coach 引擎
+            <select id="coachEngineInput">
+              <option value="rules">规则引擎</option>
+              <option value="llm">DeepSeek LLM</option>
+            </select>
+          </label>
+
+          <button id="openKeyModalButton" class="wide">配置 DeepSeek / 火山 Key</button>
+          <p class="hint">需要用 Python 后台打开本页，默认地址是 http://127.0.0.1:8765/backend.html。</p>
+        </aside>
+
+        <section class="workspace">
+          <div class="mode-tabs">
+            <button class="tab active" data-mode="record">实时录音</button>
+            <button class="tab" data-mode="upload">上传录音文件</button>
+            <button class="tab" data-mode="transcript">逐字稿调试</button>
+          </div>
+
+          <section class="panel mode-panel active" id="recordPanel">
+            <div class="record-stage">
+              <button class="record-button" id="recordButton">开始录音</button>
+              <div>
+                <h2 id="recordStatus">等待开始</h2>
+                <p id="recordMeta">录音会按配置间隔切片，并写入后台 session 日志。</p>
+              </div>
+            </div>
+            <div class="meters">
+              <div>
+                <span>录音时长</span>
+                <strong id="recordDuration">00:00</strong>
+              </div>
+              <div>
+                <span>已上传切片</span>
+                <strong id="chunkCount">0</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel mode-panel" id="uploadPanel">
+            <label class="drop-zone">
+              <input id="audioFileInput" type="file" accept="audio/*" />
+              <span id="audioFileLabel">选择录音文件</span>
+            </label>
+            <div class="row">
+              <button id="saveAudioButton">保存到本次日志</button>
+              <button id="coachAudioButton" class="secondary">转写并运行 Copilot</button>
+            </div>
+            <p class="hint" id="uploadStatus">上传音频会保存到后台 `outputs/web_sessions`。完整转写会按真实音频时长推流。</p>
+          </section>
+
+          <section class="panel mode-panel" id="transcriptPanel">
+            <label>
+              逐字稿
+              <textarea id="transcriptInput" rows="9" placeholder="粘贴逐字稿，用后台规则或 LLM Copilot 运行"></textarea>
+            </label>
+            <button id="coachTranscriptButton">运行 Copilot</button>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Copilot 提醒</h2>
+              <span id="alertCount">0 条</span>
+            </div>
+            <div id="alerts" class="alerts empty">暂无提醒</div>
+          </section>
+        </section>
+
+        <aside class="panel log-panel">
+          <div class="panel-head">
+            <h2>本次运行日志</h2>
+            <button id="refreshLogButton" class="secondary">刷新</button>
+          </div>
+          <pre id="logOutput"></pre>
+          <div class="row">
+            <button id="exportDiagButton">导出诊断包</button>
+            <button id="clearLogButton" class="danger">清除日志</button>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <dialog id="keyDialog">
+      <form method="dialog" class="modal">
+        <div class="panel-head">
+          <h2>Key 配置</h2>
+          <button value="cancel" class="icon-button">关闭</button>
+        </div>
+        <label>DeepSeek API Key <input id="deepseekKeyInput" type="password" autocomplete="off" /></label>
+        <label>DeepSeek Base URL <input id="deepseekBaseUrlInput" value="https://api.deepseek.com" /></label>
+        <label>DeepSeek Model <input id="deepseekModelInput" value="deepseek-v4-pro" /></label>
+        <label>火山 ASR API Key <input id="volcKeyInput" type="password" autocomplete="off" /></label>
+        <label>火山 ASR Resource ID <input id="volcResourceInput" value="volc.seedasr.sauc.duration" /></label>
+        <label>火山 ASR WebSocket URL <input id="volcWsInput" value="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async" /></label>
+        <menu>
+          <button id="saveKeysButton" value="default">保存</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <script src="./backend.js"></script>
+  </body>
+</html>

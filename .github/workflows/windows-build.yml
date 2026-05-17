@@ -1,0 +1,95 @@
+name: Windows build (tag)
+
+# §6 step 4 — produce the shippable Windows installer.
+# Trigger: ONLY on version tags (push a tag like v0.1.0). No push/PR builds,
+# to conserve the 2x-rate Windows Actions minutes. workflow_dispatch is kept
+# as a manual escape hatch (does not auto-run, costs nothing until invoked).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to attach the installer to the GitHub Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python (build machine only — end users need no Python)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Inno Setup (provides ISCC.exe)
+        run: choco install innosetup -y --no-progress
+
+      - name: Build (PyInstaller one-folder + Inno Setup setup.exe)
+        shell: pwsh
+        run: .\packaging\build.ps1
+
+      - name: Headless smoke test (§0 — HTTP endpoints)
+        shell: pwsh
+        run: |
+          $exe = ".\packaging\dist\SalesRetro\SalesRetro.exe"
+          if (-not (Test-Path $exe)) { throw "build did not produce $exe" }
+          $p = Start-Process -FilePath $exe -PassThru
+          try {
+            $ok = $false
+            foreach ($i in 1..30) {
+              try {
+                $r = Invoke-WebRequest "http://127.0.0.1:8765/api/health" -UseBasicParsing -TimeoutSec 2
+                if ($r.StatusCode -eq 200) { $ok = $true; break }
+              } catch { Start-Sleep -Milliseconds 700 }
+            }
+            if (-not $ok) { throw "server did not become healthy in time" }
+            foreach ($path in "/backend.html","/app.js","/api/default-config") {
+              $r = Invoke-WebRequest "http://127.0.0.1:8765$path" -UseBasicParsing -TimeoutSec 5
+              if ($r.StatusCode -ne 200) { throw "$path returned $($r.StatusCode)" }
+              Write-Host "$path -> 200"
+            }
+          }
+          finally {
+            if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          }
+
+      - name: Decode-pipeline regression (libsndfile present & usable)
+        shell: pwsh
+        run: |
+          .\packaging\.buildenv\Scripts\python -c @"
+          import asyncio, numpy as np, soundfile as sf, tempfile, os
+          from sales_retro_agent.audio_sources import iter_file_pcm_chunks
+          print('libsndfile', sf.__libsndfile_version__)
+          p = os.path.join(tempfile.gettempdir(), 'probe.wav')
+          sf.write(p, (np.zeros(8000)).astype('float32'), 16000)
+          async def run():
+              n=0
+              async for c in iter_file_pcm_chunks(p, chunk_ms=200, realtime=False):
+                  n+=1
+              return n
+          print('decoded chunks:', asyncio.run(run()))
+          "@
+          # NOTE: mp3 read (§4.1) is validated via the identical soundfile wheel
+          # and remains a first-acceptance manual check on Windows per
+          # packaging/PACKAGING_NOTES.md.
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SalesRetro-Setup
+          path: |
+            packaging/Output/SalesRetro-Setup.exe
+            packaging/dist/SalesRetro/**
+          if-no-files-found: error
+
+      - name: Attach installer to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/Output/SalesRetro-Setup.exe
