@@ -150,7 +150,9 @@ class WebRequestHandler(BaseHTTPRequestHandler):
 
     def send_static(self, request_path: str) -> None:
         if request_path in {"", "/"}:
-            request_path = "/index.html"
+            # This deployment is the thin-backend LLM build; the root must land
+            # on backend.html, not the rules-only pure-frontend index.html.
+            request_path = "/backend.html"
         normalized = posixpath.normpath(request_path.lstrip("/"))
         if normalized.startswith(".."):
             self.send_error(HTTPStatus.FORBIDDEN)
@@ -208,7 +210,9 @@ def default_config() -> dict[str, Any]:
     return {
         "prompt": LLM_COACH_SYSTEM_PROMPT,
         "uploadIntervalSeconds": 60,
-        "coachEngine": "llm" if deepseek.api_key else "rules",
+        # LLM-only deployment: always default to the DeepSeek LLM coach. The
+        # user supplies the key via the in-app dialog, not server env.
+        "coachEngine": "llm",
         "deepseekApiKey": deepseek.api_key,
         "deepseekBaseUrl": deepseek.base_url,
         "deepseekModel": deepseek.model,

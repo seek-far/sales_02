@@ -31,7 +31,7 @@ function getConfig() {
 function setConfig(config) {
   $("promptInput").value = config.prompt || "";
   $("intervalInput").value = String(config.uploadIntervalSeconds || 60);
-  $("coachEngineInput").value = config.coachEngine || "rules";
+  $("coachEngineInput").value = config.coachEngine || "llm";
   $("deepseekKeyInput").value = config.deepseekApiKey || "";
   $("deepseekBaseUrlInput").value = config.deepseekBaseUrl || "https://api.deepseek.com";
   $("deepseekModelInput").value = config.deepseekModel || "deepseek-v4-pro";

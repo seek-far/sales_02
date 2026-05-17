@@ -23,6 +23,10 @@
    `pyproject.toml` 的 `[project.scripts]` 已删，别加回指向不存在模块的入口。
 5. **`src/`（可运行程序）与 `packaging/`（打包胶水）分离是刻意的。**
    `launcher.py` 等打包文件不要塞进 `src/`。
+6. **这是 LLM-only 薄后端交付**：根路由 `/` 必须给 `backend.html`（不是
+   rules-only 的 `index.html`，后者已改为重定向到 backend.html）；
+   `default_config()` 的 `coachEngine` 固定 `"llm"`；`backend.html` 引擎下拉
+   只留 DeepSeek LLM。别把规则引擎选项 / 纯前端页作为默认加回来。
 
 ## 标准变更工作流（本项目特化全局规则）
 

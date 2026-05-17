@@ -49,8 +49,7 @@
           <label>
             Coach 引擎
             <select id="coachEngineInput">
-              <option value="rules">规则引擎</option>
-              <option value="llm">DeepSeek LLM</option>
+              <option value="llm" selected>DeepSeek LLM</option>
             </select>
           </label>
 
@@ -91,8 +90,8 @@
               <span id="audioFileLabel">选择录音文件</span>
             </label>
             <div class="row">
-              <button id="saveAudioButton">保存到本次日志</button>
-              <button id="coachAudioButton" class="secondary">转写并运行 Copilot</button>
+              <button id="coachAudioButton">开始转写并运行 Copilot</button>
+              <button id="saveAudioButton" class="secondary">仅保存到本次日志</button>
             </div>
             <p class="hint" id="uploadStatus">上传音频会保存到后台 `outputs/web_sessions`。完整转写会按真实音频时长推流。</p>
           </section>

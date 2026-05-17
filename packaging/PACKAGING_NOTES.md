@@ -47,6 +47,16 @@ CI 在 `windows-latest` 上：装 Python+Inno Setup → 跑 `build.ps1` → §0 
 - 仍待 Windows 实测：在干净 Windows（无 Python）上跑 `build.ps1` 产物，复测上述项
   （soundfile 的 Windows wheel 同样自带 libsndfile 1.2.x，预期一致）。
 
+**§6 第 3、4 步 Windows CI 实测（已绿）：**
+
+- GitHub Actions `windows-latest` 上 `build.ps1` 跑通：PyInstaller onedir +
+  Inno Setup 编译出 `SalesRetro-Setup.exe`；Headless 冒烟（health/backend.html/
+  app.js/default-config 全 200）+ WAV 解码回归全部通过。
+- 修过的坑：`installer.iss` 原引用非自带的 `ChineseSimplified.isl` 导致 ISCC
+  失败（build 步 exit 1）；已改为只用 `Default.isl`。
+- 仍未做：真人在干净 Windows 上的**交互式验收**（装/图标/浏览器/卸载 +
+  §4.1 用真实 mp3 复测）——CI 无头冒烟替代不了。
+
 ---
 
 ## 1. 打包前应做的代码解耦（重要，但当前未做）
@@ -144,11 +154,42 @@ CI 在 `windows-latest` 上：装 Python+Inno Setup → 跑 `build.ps1` → §0 
 1. ~~先做 §1.1 sounddevice 惰性导入解耦 + §1.2 删悬空 script 入口。~~ **[DONE]**
 2. ~~写启动器 + `.spec`，出 one-folder 包，跑 §0 冒烟 + §4.1 mp3 实测。~~ **[DONE]**
    （Linux 交叉验证完成；Windows 产物待在 Windows 上跑 `build.ps1` 复测）
-3. ~~套 Inno Setup 出 setup.exe~~ **[DONE/脚本]**：`installer.iss` 已写好，
-   `build.ps1` 已串联 ISCC。**待在 Windows 上**：跑 `build.ps1` 出 `setup.exe`，
-   并在干净 Windows（无 Python）上端到端验收（装→开始菜单图标→自动开 backend.html
-   →§0 那组冒烟 + §4.1 mp3 复测→卸载干净）。  ← 当前卡在「需 Windows 环境」
-4. ~~加 GH Actions windows 构建~~ **[DONE/流水线]**：`.github/workflows/windows-build.yml`
-   已写好，打 `v*` tag 即在 windows runner 出 setup.exe + 自动 §0 冒烟。
-   **待执行**：由你 `git push` 到 github.com（private 仓库即可）并打第一个 tag 触发；
-   首个产物仍需一次真人 Windows 交互验收（装/图标/浏览器/卸载 + §4.1 mp3 复测）。
+3. ~~套 Inno Setup 出 setup.exe~~ **[DONE]**：`installer.iss` + `build.ps1` 串联
+   ISCC，已在 Windows CI 实际编译出 `SalesRetro-Setup.exe`（见 §0）。
+4. ~~加 GH Actions windows 构建~~ **[DONE]**：`.github/workflows/windows-build.yml`
+   已在 `windows-latest` 跑绿，产出 setup.exe artifact + 自动 §0 冒烟。
+5. **唯一剩余**：真人在干净 Windows（无 Python）上交互式验收 + 打正式 tag 出
+   Release（见下「收尾」）。
+
+## 收尾（仅剩这些，均需你在 Windows / 执行 git）
+
+A. 出正式 Release（之前的绿是 workflow_dispatch，未附 Release 资产）：
+```bash
+git tag v0.1.1 && git push origin v0.1.1   # 触发后自动建 Release 并附 setup.exe
+```
+B. 干净 Windows（无 Python）交互式验收清单：
+   1. 下载该 tag Release 的 `SalesRetro-Setup.exe`，双击安装（应无 UAC/管理员）。
+   2. 开始菜单出现「Sales Retro」快捷方式，点击后浏览器自动开 `backend.html`。
+   3. 「上传录音文件 / 逐字稿」链路可用；§4.1 用一个**真实 mp3** 走一遍转写。
+   4. 「实时录音」tab 可用（localhost 是安全上下文）。
+   5. 卸载：控制面板/设置里卸载，`%LOCALAPPDATA%\Programs\SalesRetro\` 清除干净
+      （数据目录 `%LOCALAPPDATA%\SalesRetro\` 默认保留——是否加卸载清理见 TODO）。
+
+## 安装包反馈修复（v0.1.0 实测后）
+
+实测安装包发现：①无默认提示词 ②上传录音无运行按钮 ③只有规则引擎。
+根因：根路径 `/` 落到 rules-only 的 `index.html`（纯前端页）。已修：
+
+- `web.py`：`/` → `backend.html`；`default_config().coachEngine` 固定 `"llm"`。
+- `index.html`：改为重定向到 `backend.html`（保留纯前端页无意义且误导）。
+- `backend.html`：引擎下拉只留 DeepSeek LLM；上传面板「开始转写并运行 Copilot」
+  设为主按钮。
+- `backend.js`：`coachEngine` 默认 `"llm"`。
+- 回归：`src/tests/test_web_defaults.py`（4 用例）+ HTTP 冒烟，全绿。
+
+下次出包用新 tag（如 `v0.1.2`）。
+
+## 待定 TODO（非阻塞）
+
+- 卸载时是否一并清 `%LOCALAPPDATA%\SalesRetro\` 数据目录（建议带询问，未做）。
+- 升级 `actions/checkout`、`actions/setup-python` 以消除 Node20 弃用 warning（非致命）。

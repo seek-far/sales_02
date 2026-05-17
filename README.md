@@ -80,3 +80,6 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
   - `pyproject.toml` 已删除指向未复制 `cli.py` 的悬空 `[project.scripts]` 入口。
   - `sounddevice` 从基础依赖移至可选 extra `mic`；薄后端 `pip install .` 不再安装它。
 - `audio_sources.py` 依赖的 numpy/soundfile 为外部 pip 包，由 `pip install .` 安装，不在源码复制范围。
+- **LLM-only 交付**：根路径 `/` 直达 `backend.html`，`index.html` 重定向至此；
+  默认引擎固定 DeepSeek LLM（不提供规则引擎），默认提示词由 `/api/default-config`
+  下发。详见 `packaging/PACKAGING_NOTES.md`「安装包反馈修复」。

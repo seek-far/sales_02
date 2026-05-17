@@ -4,130 +4,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sales Copilot</title>
+    <!-- This is the thin-backend LLM build. The rules-only pure-frontend page
+         is intentionally retired here; everything redirects to backend.html. -->
+    <meta http-equiv="refresh" content="0; url=./backend.html" />
     <link rel="stylesheet" href="./styles.css" />
+    <script>
+      location.replace("./backend.html");
+    </script>
   </head>
   <body>
     <main class="app-shell">
-      <section class="topbar">
-        <div>
-          <h1>Sales Copilot</h1>
-          <p>纯前端本地版</p>
-        </div>
-        <div class="session-pill" id="sessionLabel">未开始</div>
-      </section>
-
-      <section class="layout">
-        <aside class="panel config-panel">
-          <div class="panel-head">
-            <h2>基本配置</h2>
-            <button class="icon-button" id="saveConfigButton" title="保存配置">保存</button>
-          </div>
-
-          <label>
-            提示词
-            <textarea id="promptInput" rows="7" placeholder="导入或粘贴你的 Copilot 提示词。纯前端规则引擎不会把提示词发送到任何服务。"></textarea>
-          </label>
-          <div class="row">
-            <input id="promptFileInput" type="file" accept=".txt,.md,.prompt" hidden />
-            <button id="importPromptButton">导入提示词</button>
-            <button id="clearPromptButton" class="secondary">清空</button>
-          </div>
-
-          <label>
-            评估间隔
-            <select id="intervalInput">
-              <option value="30">30 秒</option>
-              <option value="60" selected>1 分钟</option>
-              <option value="120">2 分钟</option>
-              <option value="300">5 分钟</option>
-            </select>
-          </label>
-
-          <label>
-            Coach 引擎
-            <select id="coachEngineInput">
-              <option value="rules">浏览器规则引擎</option>
-            </select>
-          </label>
-
-          <p class="hint">
-            这个版本不需要后台。录音、逐字稿、配置和日志都只保存在当前浏览器里，可手动导出。
-          </p>
-        </aside>
-
-        <section class="workspace">
-          <div class="mode-tabs">
-            <button class="tab active" data-mode="record">实时录音</button>
-            <button class="tab" data-mode="upload">录音文件</button>
-            <button class="tab" data-mode="transcript">逐字稿调试</button>
-          </div>
-
-          <section class="panel mode-panel active" id="recordPanel">
-            <div class="record-stage">
-              <button class="record-button" id="recordButton">开始录音</button>
-              <div>
-                <h2 id="recordStatus">等待开始</h2>
-                <p id="recordMeta">浏览器会按评估间隔切片。支持 Web Speech API 的浏览器会同步生成实时逐字稿。</p>
-              </div>
-            </div>
-            <div class="meters">
-              <div>
-                <span>录音时长</span>
-                <strong id="recordDuration">00:00</strong>
-              </div>
-              <div>
-                <span>录音切片</span>
-                <strong id="chunkCount">0</strong>
-              </div>
-            </div>
-            <textarea id="liveTranscriptInput" rows="6" placeholder="实时识别文本会出现在这里；也可以手动输入后点击运行 Copilot。"></textarea>
-            <div class="row">
-              <button id="coachLiveButton">运行 Copilot</button>
-              <button id="downloadRecordingButton" class="secondary" disabled>下载录音</button>
-            </div>
-          </section>
-
-          <section class="panel mode-panel" id="uploadPanel">
-            <label class="drop-zone">
-              <input id="audioFileInput" type="file" accept="audio/*" />
-              <span id="audioFileLabel">选择录音文件</span>
-            </label>
-            <p class="hint" id="uploadStatus">
-              纯前端版不会把音频上传到后台，也不能稳定调用本地火山 ASR。请选择已有逐字稿，或使用实时录音里的浏览器语音识别。
-            </p>
-          </section>
-
-          <section class="panel mode-panel" id="transcriptPanel">
-            <label>
-              逐字稿
-              <textarea id="transcriptInput" rows="9" placeholder="粘贴销售会谈逐字稿，用浏览器规则引擎快速验证提醒策略。"></textarea>
-            </label>
-            <button id="coachTranscriptButton">运行 Copilot</button>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
-              <h2>Copilot 提醒</h2>
-              <span id="alertCount">0 条</span>
-            </div>
-            <div id="alerts" class="alerts empty">暂无提醒</div>
-          </section>
-        </section>
-
-        <aside class="panel log-panel">
-          <div class="panel-head">
-            <h2>本次运行日志</h2>
-            <button id="refreshLogButton" class="secondary">刷新</button>
-          </div>
-          <pre id="logOutput"></pre>
-          <div class="row">
-            <button id="exportDiagButton">导出诊断包</button>
-            <button id="clearLogButton" class="danger">清除日志</button>
-          </div>
-        </aside>
-      </section>
+      <p>正在前往 Sales Copilot（LLM 版）……
+        如未自动跳转，请点击 <a href="./backend.html">这里</a>。</p>
     </main>
-
-    <script src="./app.js"></script>
   </body>
 </html>
