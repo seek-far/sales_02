@@ -36,7 +36,10 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\{#AppExeName}
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; Only Default.isl ships with a stock Inno Setup 6 install (what choco gives
+; the CI runner). ChineseSimplified.isl is an unofficial add-on and is NOT
+; bundled, so referencing it makes ISCC fail. English wizard is fine for a
+; double-click one-click installer.
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]

@@ -122,6 +122,9 @@ CI 在 `windows-latest` 上：装 Python+Inno Setup → 跑 `build.ps1` → §0 
 2. **杀毒误报**：one-folder + 安装器可显著缓解；进一步需代码签名证书（要花钱，
    测试阶段可不做）。
 3. **必须在 Windows 上构建**：建议 GH Actions windows job，避免本地环境漂移。
+   - 已踩坑：`installer.iss` 的 `[Languages]` 只能用 `compiler:Default.isl`。
+     `ChineseSimplified.isl` 非 Inno Setup 6 标准发行自带，choco 装的 runner 上
+     不存在，引用它会让 ISCC 失败、整个 build 步退出码 1。别加回中文 .isl。
 4. localhost 是安全上下文 → 本机版 `backend.html` 的「实时录音」tab **可用**
    （这是本机部署相对公网 IP 部署的优势，公网 IP 非 HTTPS 会被浏览器拒录音）。
 
