@@ -31,6 +31,13 @@ build-backend = "setuptools.build_meta"
 include = ["sales_retro_agent*"]
 exclude = ["samples*", "tests*"]
 
+# web_static/ holds the frontend (backend.html / app.js / ...). It is NOT .py,
+# so setuptools won't ship it in the wheel without this. The PyInstaller path
+# bundles it via spec `datas`, but `pip install .` (DEPLOY.md public deploy)
+# relies on this — without it the served root 404s. Do not remove.
+[tool.setuptools.package-data]
+sales_retro_agent = ["web_static/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

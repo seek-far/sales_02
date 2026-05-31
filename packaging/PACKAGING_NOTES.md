@@ -1,6 +1,9 @@
 # 打包笔记 — Windows 本机一键安装
 
 目标：Windows 用户、**无 Python**，双击即装即用本机版（前端 + 薄后端）。
+本文件只覆盖 **Windows 一键包**。公网部署是另一条独立路径，见
+`../deploy/DEPLOY.md`（systemd + Caddy，nip.io / 自签两套 HTTPS-over-IP）。
+
 本文件是计划与已知坑记录。
 
 > **进度：§6 第 1、2 步已完成**——见各节内 `[DONE]` 标注。
@@ -122,6 +125,12 @@ CI 在 `windows-latest` 上：装 Python+Inno Setup → 跑 `build.ps1` → §0 
 - numpy：PyInstaller 有 hook。
 - soundfile → **libsndfile.dll**：PyInstaller 有 hook。
 - sounddevice / PortAudio：**1.1 解耦已完成 → 薄后端打包无需 PortAudio**。
+- `web_static/`（前端，非 .py）：PyInstaller 走 spec `datas` 打包；但
+  `pip install .`（DEPLOY.md 公网部署路径）必须靠 `pyproject.toml` 的
+  `[tool.setuptools.package-data] sales_retro_agent = ["web_static/*"]`，
+  否则 wheel 不含前端、根路由 404。`src/tests/test_web_static_packaged.py`
+  守护此声明（曾在首次公网部署实测中暴露：API 200 但 `/`、`/backend.html`
+  全 404）。别删那行 package-data。
 
 ---
 

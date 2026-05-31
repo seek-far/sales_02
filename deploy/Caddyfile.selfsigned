@@ -1,0 +1,20 @@
+# Option B — self-signed HTTPS directly on the bare IP.
+#
+# `tls internal` makes Caddy mint a cert (with the IP in SAN) from its own
+# local CA. The connection is encrypted and counts as a SECURE CONTEXT, so
+# 实时录音 works — but browsers show a one-time "not trusted" warning that
+# each user must accept ("Advanced -> proceed"). Fine for a controlled test.
+#
+# Replace 203.0.113.45 with YOUR public IP. No port 80 / ACME needed.
+# Run:  caddy run --config deploy/Caddyfile.selfsigned
+
+https://203.0.113.45 {
+    tls internal
+    reverse_proxy 127.0.0.1:8765
+    encode zstd gzip
+}
+
+# --- Alternative: bring your own OpenSSL cert instead of `tls internal` ---
+# Generate it with deploy/gen-selfsigned-cert.sh (puts the IP in SAN), then
+# swap the `tls internal` line above for:
+#     tls /opt/sales-retro/tls/cert.pem /opt/sales-retro/tls/key.pem

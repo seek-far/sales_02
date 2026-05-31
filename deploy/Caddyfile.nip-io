@@ -1,0 +1,17 @@
+# Option A — trusted HTTPS over a bare IP via nip.io, NO browser warning.
+#
+# How it works: nip.io maps  <dashed-ip>.nip.io  ->  that IP, automatically.
+# Caddy then obtains a real Let's Encrypt cert for that hostname, so users
+# get a green padlock and a full secure context (实时录音 works, traffic
+# encrypted) without owning any domain.
+#
+# Replace 203-0-113-45 with YOUR public IP, dots -> dashes.
+# Requirements:
+#   - Public IP reachable on TCP 80 AND 443 (ACME http/tls challenge).
+#   - Run:  caddy run --config deploy/Caddyfile.nip-io
+#     (or install Caddy as a service; see DEPLOY.md)
+
+203-0-113-45.nip.io {
+    reverse_proxy 127.0.0.1:8765
+    encode zstd gzip
+}

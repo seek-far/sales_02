@@ -1,0 +1,35 @@
+# systemd unit — runs the thin backend bound to LOOPBACK only.
+# Public TLS is terminated by Caddy in front (see Caddyfile.*); the app itself
+# never faces the internet directly.
+#
+# Install:
+#   sudo cp deploy/sales-retro.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now sales-retro
+#
+# Edit the <PLACEHOLDERS> below to match your box.
+
+[Unit]
+Description=Sales Retro thin backend (LLM-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# A non-root user that owns the install + data dir.
+User=<DEPLOY_USER>
+Group=<DEPLOY_USER>
+# outputs/web_sessions is written relative to CWD — point it at a writable dir.
+WorkingDirectory=/opt/sales-retro/data
+# Use the venv's python created during deploy (see DEPLOY.md).
+ExecStart=/opt/sales-retro/venv/bin/python -m sales_retro_agent.web --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=3
+# Do NOT put real DEEPSEEK_API_KEY / VOLC keys here:
+# /api/default-config returns server env keys in plaintext to the browser.
+# Each user enters their own key in the in-app dialog.
+# EnvironmentFile=/opt/sales-retro/.env   # leave commented unless you know why
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

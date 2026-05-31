@@ -33,7 +33,17 @@ sales_02/
     installer.iss            # Inno Setup → 单个 setup.exe（按用户安装）
     build.ps1 / build.sh     # Windows / Linux 构建
     PACKAGING_NOTES.md       # 计划与进度
+  deploy/                    # 公网部署（与 src/、packaging/ 三者解耦）
+    DEPLOY.md                # 公网 IP 部署指南 + 清单（先读这个）
+    sales-retro.service      # systemd 常驻单元（app 绑回环）
+    Caddyfile.nip-io         # HTTPS-over-IP A：nip.io + 自动证书（无警告）
+    Caddyfile.selfsigned     # HTTPS-over-IP B：自签（一次性警告）
+    gen-selfsigned-cert.sh   # 可选：带 IP SAN 的自签证书生成
 ```
+
+两条交付路径并存，按场景二选一：
+- **本机一键包**：`packaging/`（每用户本机一个 app，localhost 天然安全上下文）。
+- **公网部署**：`deploy/DEPLOY.md`（一处部署多人用，自管 HTTPS/安全/数据留存）。
 
 ## 运行
 
