@@ -17,10 +17,15 @@ def _purge(*prefixes: str) -> None:
 
 
 def test_audio_sources_import_does_not_pull_sounddevice() -> None:
-    _purge("sales_retro_agent", "sounddevice")
+    _purge("sales_retro_agent", "sounddevice", "av")
     importlib.import_module("sales_retro_agent.audio_sources")
     assert "sounddevice" not in sys.modules, (
         "importing audio_sources must not import sounddevice (PortAudio)"
+    )
+    # PyAV is imported lazily too (only when a file is actually decoded), so a
+    # bare import must stay cheap.
+    assert "av" not in sys.modules, (
+        "importing audio_sources must not import av until a file is decoded"
     )
 
 
@@ -31,9 +36,10 @@ def test_web_backend_import_does_not_pull_sounddevice() -> None:
         "the thin web backend must not require PortAudio at import time"
     )
     # Sanity: the file-decode path the backend actually uses is still present.
-    from sales_retro_agent.audio_sources import iter_file_pcm_chunks
+    from sales_retro_agent.audio_sources import decode_file_to_pcm16, iter_pcm_chunks
 
-    assert callable(iter_file_pcm_chunks)
+    assert callable(decode_file_to_pcm16)
+    assert callable(iter_pcm_chunks)
     assert web.STATIC_DIR.exists()
 
 

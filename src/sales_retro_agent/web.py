@@ -20,7 +20,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .asr_volc import VolcAsrEngine
-from .audio_sources import iter_file_pcm_chunks
+from .audio_sources import TARGET_RATE, decode_file_to_pcm16, iter_pcm_chunks
 from .coach_debug import build_coach_debug_record, snapshot_state
 from .config import Settings, VolcAsrSettings, load_settings, load_volc_asr_settings
 from .llm_coach import LLM_COACH_SYSTEM_PROMPT, LLMRealtimeCoach
@@ -362,7 +362,23 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
         language=str(config.get("volcAsrLanguage") or "zh-CN"),
     )
     append_event(session_id, "audio_decode_started", {"audioPath": str(path)})
-    chunks = iter_file_pcm_chunks(path, chunk_ms=200, realtime=True)
+    # Decode the whole file to 16 kHz mono PCM BEFORE opening the ASR socket.
+    # Decoding is CPU-bound, so run it off the event loop; doing it up front
+    # means no ASR session is open while we decode, so the server's 8 s
+    # "waiting next packet" deadline (error 45000081) can never trigger.
+    pcm = await asyncio.to_thread(decode_file_to_pcm16, path)
+    append_event(
+        session_id,
+        "audio_decoded",
+        {"pcmBytes": len(pcm), "durationSeconds": round(len(pcm) / 2 / TARGET_RATE, 1)},
+    )
+    # Volc SAUC is a streaming engine: it transcribes at the pace audio arrives.
+    # Blasting the whole file at once overruns its buffer and it returns only the
+    # first few seconds before closing (observed: 113 min -> 608 chars). So pace
+    # packets at the audio's real-time rate. Decoding already happened above, so
+    # the WS opens with PCM ready and the first packet ships immediately — the
+    # 8 s "waiting next packet" deadline (45000081) still never triggers.
+    chunks = iter_pcm_chunks(pcm, chunk_ms=200, realtime=True)
     append_event(session_id, "asr_stream_starting", {"chunkMs": 200, "realtime": True})
     engine = VolcAsrEngine(
         settings=volc,

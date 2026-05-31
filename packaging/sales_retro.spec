@@ -15,18 +15,21 @@
 
 import os
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_dynamic_libs, collect_submodules
 
 SPECPATH = os.path.dirname(os.path.abspath(SPEC))  # noqa: F821 (SPEC injected)
 SRC = os.path.join(SPECPATH, "..", "src")
 WEB_STATIC = os.path.join(SRC, "sales_retro_agent", "web_static")
 
-hiddenimports = collect_submodules("openai")
+hiddenimports = collect_submodules("openai") + collect_submodules("av")
+# PyAV ships the ffmpeg shared libraries inside its wheel; pull them into the
+# bundle so the upload audio-decode path works without a system ffmpeg.
+av_binaries = collect_dynamic_libs("av")
 
 a = Analysis(
     [os.path.join(SPECPATH, "launcher.py")],
     pathex=[SRC],
-    binaries=[],
+    binaries=av_binaries,
     datas=[(WEB_STATIC, os.path.join("sales_retro_agent", "web_static"))],
     hiddenimports=hiddenimports,
     hookspath=[],

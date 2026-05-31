@@ -13,7 +13,7 @@ sales_02/
       web.py                 # 薄后端入口（HTTP server + API）
       asr_volc.py            # 火山 ASR WebSocket 引擎
       asr_types.py           # ASR 类型（asr_volc / realtime_runner 依赖，原清单遗漏）
-      audio_sources.py       # 音频解码/分帧（依赖 numpy/sounddevice/soundfile）
+      audio_sources.py       # 音频解码/分帧（依赖 numpy/av；麦克风路径才用 sounddevice）
       coach_debug.py
       config.py
       deepseek_client.py     # DeepSeek 调用（llm_coach 间接依赖）
@@ -85,11 +85,18 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
 ## 说明
 
 - 复制的是 `web.py` 的完整 import 闭包；`asr_types.py`、`llm_debug.py` 是运行必需但原清单未列出的模块，已补入。
+- **上传录音解码用 PyAV（`av`）**：其 wheel 自带 ffmpeg 库，无需终端用户另装系统 ffmpeg，
+  可解 wav/flac/ogg/mp3/m4a/webm 等浏览器与手机常见格式（旧版用 `soundfile` 读不了
+  webm/opus、m4a/aac）。上传文件会先整段解码成 16k 单声道 PCM **再**连火山 ASR，
+  避免「连上会话却来不及发第一个音频包」触发火山 `45000081 waiting next packet
+  timeout` 超时断连。发包按**音频原始速度**配速（`realtime=True`）：火山 SAUC 是
+  流式引擎，按收包节奏出结果；若全速一次性灌入会冲垮其缓冲区，只识别开头几秒就
+  收尾（实测 113 分钟音频只出 608 字）。因此上传一段 N 分钟音频，转写约需 N 分钟。
 - **已做 §6 第 1 步解耦**（见 `packaging/PACKAGING_NOTES.md`）：
   - `audio_sources.py` 的 `sounddevice` 改为惰性导入；薄后端导入链不再需要 PortAudio。
   - `pyproject.toml` 已删除指向未复制 `cli.py` 的悬空 `[project.scripts]` 入口。
   - `sounddevice` 从基础依赖移至可选 extra `mic`；薄后端 `pip install .` 不再安装它。
-- `audio_sources.py` 依赖的 numpy/soundfile 为外部 pip 包，由 `pip install .` 安装，不在源码复制范围。
+- `audio_sources.py` 依赖的 numpy/av 为外部 pip 包，由 `pip install .` 安装，不在源码复制范围。
 - **LLM-only 交付**：根路径 `/` 直达 `backend.html`，`index.html` 重定向至此；
   默认引擎固定 DeepSeek LLM（不提供规则引擎），默认提示词由 `/api/default-config`
   下发。详见 `packaging/PACKAGING_NOTES.md`「安装包反馈修复」。

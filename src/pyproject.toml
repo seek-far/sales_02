@@ -5,10 +5,14 @@ description = "DeepSeek-powered sales call review agent for transcript retrospec
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  # PyAV bundles the ffmpeg libraries in its wheels, so the upload path can
+  # decode any container/codec (wav/flac/ogg/mp3/m4a/webm/...) without the user
+  # installing a system ffmpeg. Replaces soundfile, which could not read
+  # webm/opus or m4a/aac that browsers and phones produce.
+  "av>=11.0",
   "numpy>=1.26",
   "openai>=1.60.0",
   "python-dotenv>=1.0.1",
-  "soundfile>=0.12.1",
   "websockets>=15.0"
 ]
 

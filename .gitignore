@@ -20,3 +20,5 @@ outputs/
 .env
 
 /*.md
+
+uv.lock
