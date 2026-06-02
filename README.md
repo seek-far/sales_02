@@ -96,6 +96,12 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
     按钮。点击后 `POST /api/coach-upload/cancel` 给该 session 置取消标志，后台在下一个 ASR
     事件处停止推流与 Copilot 评估，并把已转写部分正常落盘（`uploaded_audio_transcript.txt`、
     `coach_upload_completed{cancelled:true}`）。因此随后导出的诊断包即为「截止到终止时刻」的数据。
+  - **带 `[MM:SS]` 时间戳的逐字稿**：每次音频/录音转写都会在 session 目录额外落盘
+    `uploaded_audio_transcript_timestamped.txt`（随诊断包导出）。它**按 Copilot 实际评估的窗口**
+    分段，行首 `[MM:SS]` 是该窗口的音频时间位置。把它粘进「逐字稿调试」运行时，后台用
+    `parse_timestamped_transcript()` 逐窗复现**完全相同**的 `(窗口文本, elapsed_minutes)` 序列
+    （`elapsed_minutes = max(1, 秒//60)`，与上传路径同一公式），因此 Copilot 行为与原录音/音频
+    文件一致；没有 `[MM:SS]` 标记的普通逐字稿仍按字数分块近似（向后兼容）。
 - **已做 §6 第 1 步解耦**（见 `packaging/PACKAGING_NOTES.md`）：
   - `audio_sources.py` 的 `sounddevice` 改为惰性导入；薄后端导入链不再需要 PortAudio。
   - `pyproject.toml` 已删除指向未复制 `cli.py` 的悬空 `[project.scripts]` 入口。

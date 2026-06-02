@@ -211,6 +211,17 @@ B. 干净 Windows（无 Python）交互式验收清单：
   「需要用 Python 后台打开本页」提示。
 - 回归：`src/tests/test_web_defaults.py`（含取消注册表 + 端点用例）+ HTTP 冒烟。
 
+## `[MM:SS]` 时间戳逐字稿（可复现的 Copilot 调试）
+
+诊断包新增 `uploaded_audio_transcript_timestamped.txt`，让「逐字稿调试」能逐窗复现录音/音频文件的 Copilot 行为：
+
+- `web.py`：`coach_uploaded_audio` 把每个实际评估窗口记成 `(elapsedSeconds, text)`，转写结束写出
+  `[MM:SS] 窗口文本` 文件（落在 session 目录 → 自动进诊断 zip）。`format_timestamped_transcript` /
+  `parse_timestamped_transcript` 负责渲染与解析；`evaluate_transcript_for_coach` 检测到 `[MM:SS]`
+  标记就按窗口复现（同一 `elapsed_minutes = max(1, 秒//60)` 公式），否则退回字数分块（向后兼容）。
+- `backend.html`：逐字稿面板加提示，说明粘贴该文件可复现音频文件行为。
+- 回归：`src/tests/test_timestamped_transcript.py`（格式往返、无标记回退、复现序列与音频公式一致）。
+
 下次出包用新 tag（如 `v0.1.2`）。
 
 ## 待定 TODO（非阻塞）

@@ -318,6 +318,63 @@ def save_audio_blob(payload: dict[str, Any], *, folder: str) -> dict[str, Any]:
     return {"ok": True, "path": str(path), "bytes": len(data)}
 
 
+# A [MM:SS] marker at the start of a line opens a new eval window; minutes may be
+# 3+ digits for long meetings (e.g. [113:20]). Text after the marker (and any
+# following non-marker lines) is that window's content.
+_TIMESTAMP_LINE_RE = re.compile(r"^\[(\d+):([0-5]\d)\][ \t]?(.*)$")
+
+
+def format_mmss(total_seconds: float) -> str:
+    total = max(0, int(total_seconds))
+    return f"[{total // 60:02d}:{total % 60:02d}]"
+
+
+def format_timestamped_transcript(timeline: list[tuple[float, str]]) -> str:
+    """Render eval windows as a [MM:SS] transcript. Window text keeps its newlines
+    so replaying it feeds the coach byte-for-byte what the realtime run saw."""
+    return "\n".join(f"{format_mmss(seconds)} {text}" for seconds, text in timeline)
+
+
+def write_upload_transcripts(
+    session_dir: Path, transcript_parts: list[str], eval_timeline: list[tuple[float, str]]
+) -> None:
+    """Persist the plain + [MM:SS] transcripts. Called eagerly on early termination
+    (so a download right after 提前终止 already has them) and again at normal end."""
+    session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / "uploaded_audio_transcript.txt").write_text(
+        "\n".join(transcript_parts), encoding="utf-8"
+    )
+    (session_dir / "uploaded_audio_transcript_timestamped.txt").write_text(
+        format_timestamped_transcript(eval_timeline), encoding="utf-8"
+    )
+
+
+def parse_timestamped_transcript(transcript: str) -> list[tuple[int, str]] | None:
+    """Parse a [MM:SS] transcript into (elapsedSeconds, text) windows in order.
+
+    Returns ``None`` when the transcript carries no [MM:SS] markers, so callers can
+    fall back to plain char-chunking for hand-pasted transcripts.
+    """
+    segments: list[tuple[int, list[str]]] = []
+    current_seconds: int | None = None
+    current_lines: list[str] = []
+    for line in transcript.splitlines():
+        match = _TIMESTAMP_LINE_RE.match(line)
+        if match:
+            if current_seconds is not None:
+                segments.append((current_seconds, current_lines))
+            current_seconds = int(match.group(1)) * 60 + int(match.group(2))
+            current_lines = [match.group(3)] if match.group(3) else []
+        elif current_seconds is not None:
+            current_lines.append(line)
+    if current_seconds is not None:
+        segments.append((current_seconds, current_lines))
+    if not segments:
+        return None
+    windows = [(seconds, "\n".join(lines).strip()) for seconds, lines in segments]
+    return [(seconds, text) for seconds, text in windows if text]
+
+
 def coach_transcript(payload: dict[str, Any]) -> dict[str, Any]:
     session_id = payload.get("sessionId")
     transcript = str(payload.get("transcript", ""))
@@ -344,17 +401,30 @@ def evaluate_transcript_for_coach(session_id: str | None, transcript: str, confi
     chars_per_step = int(config.get("charsPerStep") or 800)
     interval_seconds = int(config.get("uploadIntervalSeconds") or 60)
 
-    for step_index, chunk in enumerate(chunk_text(transcript, chars_per_step), start=1):
-        elapsed_minutes = max(1, int((step_index * interval_seconds) / 60))
+    timestamped = parse_timestamped_transcript(transcript)
+    if timestamped is not None:
+        # Replay an exported [MM:SS] transcript: reuse the exact windows and the
+        # same elapsed-minute formula as the audio path so Copilot behaves
+        # identically to the recording/audio-file run that produced this file.
+        steps = [(text, max(1, int(seconds // 60))) for seconds, text in timestamped]
+    else:
+        # Hand-pasted transcript with no timing: approximate by char-chunking and
+        # advancing one upload interval per chunk.
+        steps = [
+            (chunk, max(1, int((index * interval_seconds) / 60)))
+            for index, chunk in enumerate(chunk_text(transcript, chars_per_step), start=1)
+        ]
+
+    for new_text, elapsed_minutes in steps:
         state_before = snapshot_state(state)
-        alert = coach.evaluate(state, chunk, elapsed_minutes=elapsed_minutes)
+        alert = coach.evaluate(state, new_text, elapsed_minutes=elapsed_minutes)
         llm_error = getattr(coach, "last_error", None)
         if llm_error:
             llm_errors.append(str(llm_error))
         debug_record = build_coach_debug_record(
             coach=coach,
             state_before=state_before,
-            new_text=chunk,
+            new_text=new_text,
             elapsed_minutes=elapsed_minutes,
             alert=alert,
         )
@@ -433,6 +503,10 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
     cursor = TranscriptCursor()
     transcript_parts: list[str] = []
     buffer: list[str] = []
+    # One entry per eval window actually sent to the coach: (elapsedSeconds, text).
+    # Exported as a [MM:SS] transcript so "逐字稿调试" can replay the exact same
+    # windows and elapsed minutes the realtime coach saw.
+    eval_timeline: list[tuple[float, str]] = []
     eval_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
     coach = create_coach(config)
     coach_state = MeetingState(first_seen=datetime.now())
@@ -449,6 +523,7 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
         if not cleaned:
             return
         elapsed_minutes = max(1, int(elapsed_seconds // 60))
+        eval_timeline.append((elapsed_seconds, cleaned))
         await eval_queue.put(
             {
                 "text": cleaned,
@@ -485,6 +560,10 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
         async for event in engine.transcribe():
             if cancel_event.is_set():
                 cancelled = True
+                # Persist transcripts up to *now* before the queue drain (which can
+                # block on an in-flight LLM eval), so a diagnostics download right
+                # after 提前终止 already contains the [MM:SS] transcript.
+                write_upload_transcripts(resolve_session_dir(session_id), transcript_parts, eval_timeline)
                 append_event(session_id, "coach_upload_cancelled", {"events": event_index})
                 break
             event_index += 1
@@ -522,7 +601,7 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
 
     session_dir = resolve_session_dir(session_id)
     transcript = "\n".join(transcript_parts)
-    (session_dir / "uploaded_audio_transcript.txt").write_text(transcript, encoding="utf-8")
+    write_upload_transcripts(session_dir, transcript_parts, eval_timeline)
     append_event(
         session_id,
         "asr_completed",
