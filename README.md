@@ -92,6 +92,10 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
   timeout` 超时断连。发包按**音频原始速度**配速（`realtime=True`）：火山 SAUC 是
   流式引擎，按收包节奏出结果；若全速一次性灌入会冲垮其缓冲区，只识别开头几秒就
   收尾（实测 113 分钟音频只出 608 字）。因此上传一段 N 分钟音频，转写约需 N 分钟。
+  - **「提前终止」**：因转写按实时配速、长音频耗时长，上传面板在运行期间显示「提前终止」
+    按钮。点击后 `POST /api/coach-upload/cancel` 给该 session 置取消标志，后台在下一个 ASR
+    事件处停止推流与 Copilot 评估，并把已转写部分正常落盘（`uploaded_audio_transcript.txt`、
+    `coach_upload_completed{cancelled:true}`）。因此随后导出的诊断包即为「截止到终止时刻」的数据。
 - **已做 §6 第 1 步解耦**（见 `packaging/PACKAGING_NOTES.md`）：
   - `audio_sources.py` 的 `sounddevice` 改为惰性导入；薄后端导入链不再需要 PortAudio。
   - `pyproject.toml` 已删除指向未复制 `cli.py` 的悬空 `[project.scripts]` 入口。

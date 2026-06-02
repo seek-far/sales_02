@@ -191,6 +191,7 @@ async function saveAudioFile() {
 async function coachAudioFile() {
   if (!state.lastUploadedAudio) await saveAudioFile();
   setUploadStatus("正在转写并运行 Copilot。为保证完整性，上传录音会按真实音频时长推流...");
+  setCoachAudioRunning(true);
   const poller = setInterval(() => refreshLog().catch(console.error), 3000);
   try {
     const result = await api("/api/coach-upload", {
@@ -200,10 +201,27 @@ async function coachAudioFile() {
     });
     renderAlerts(result.alerts || []);
     await refreshLog();
-    setUploadStatus(`处理完成：转写 ${result.transcript?.length || 0} 字，生成 ${result.alerts?.length || 0} 条提醒。`);
+    const prefix = result.cancelled ? "已提前终止" : "处理完成";
+    setUploadStatus(`${prefix}：转写 ${result.transcript?.length || 0} 字，生成 ${result.alerts?.length || 0} 条提醒。`);
   } finally {
     clearInterval(poller);
+    setCoachAudioRunning(false);
   }
+}
+
+function setCoachAudioRunning(running) {
+  $("coachAudioButton").disabled = running;
+  $("saveAudioButton").disabled = running;
+  const stopButton = $("stopCoachAudioButton");
+  stopButton.hidden = !running;
+  stopButton.disabled = false;
+}
+
+async function stopCoachAudioFile() {
+  if (!state.sessionId) return;
+  $("stopCoachAudioButton").disabled = true;
+  setUploadStatus("正在提前终止，保留已转写部分...");
+  await api("/api/coach-upload/cancel", { sessionId: state.sessionId });
 }
 
 async function coachTranscript() {
@@ -310,6 +328,7 @@ function wireEvents() {
   });
   $("saveAudioButton").addEventListener("click", () => saveAudioFile().catch(showError));
   $("coachAudioButton").addEventListener("click", () => coachAudioFile().catch(showError));
+  $("stopCoachAudioButton").addEventListener("click", () => stopCoachAudioFile().catch(showError));
   $("coachTranscriptButton").addEventListener("click", () => coachTranscript().catch(showError));
   $("refreshLogButton").addEventListener("click", () => refreshLog().catch(showError));
   $("exportDiagButton").addEventListener("click", () => exportDiagnostics().catch(showError));

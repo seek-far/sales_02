@@ -194,7 +194,22 @@ B. 干净 Windows（无 Python）交互式验收清单：
 - `backend.html`：引擎下拉只留 DeepSeek LLM；上传面板「开始转写并运行 Copilot」
   设为主按钮。
 - `backend.js`：`coachEngine` 默认 `"llm"`。
-- 回归：`src/tests/test_web_defaults.py`（4 用例）+ HTTP 冒烟，全绿。
+- 回归：`src/tests/test_web_defaults.py` + HTTP 冒烟，全绿。
+
+## 上传转写「提前终止」（v0.1.2 后）
+
+长音频按实时配速转写耗时长（N 分钟音频≈N 分钟），新增中途停止能力：
+
+- `backend.html`：上传面板加「提前终止」按钮（运行期间显示）。
+- `backend.js`：运行时禁用「开始转写/仅保存」并露出「提前终止」；点击 `POST
+  /api/coach-upload/cancel`。
+- `web.py`：线程安全的取消注册表（`register/request/clear_coach_upload_cancel`，
+  因 coach-upload 在各自线程上实时推流、取消请求来自另一线程）；`coach_uploaded_audio`
+  的转写循环每个 ASR 事件检查取消标志，置位即停推流与 Copilot 评估并把已转写部分
+  正常落盘。导出诊断包即为截止到终止时刻的数据。
+- 顶栏文案：去掉「前台 + 薄后台代理版」副标题与「纯前端版」切换链接；上传面板去掉
+  「需要用 Python 后台打开本页」提示。
+- 回归：`src/tests/test_web_defaults.py`（含取消注册表 + 端点用例）+ HTTP 冒烟。
 
 下次出包用新 tag（如 `v0.1.2`）。
 

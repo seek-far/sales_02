@@ -9,6 +9,7 @@ import posixpath
 import re
 import secrets
 import shutil
+import threading
 import time
 import zipfile
 from dataclasses import asdict
@@ -33,6 +34,41 @@ ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "web_static"
 SESSION_ROOT = Path("outputs") / "web_sessions"
 MAX_JSON_BYTES = 512 * 1024 * 1024
+
+# Early-termination registry for in-flight coach-upload runs. A coach-upload
+# request streams audio at real time on its own thread (ThreadingHTTPServer),
+# so the "提前终止" button arrives on a *different* thread; we hand it a
+# threading.Event the streaming loop polls between ASR events.
+_CANCEL_EVENTS: dict[str, threading.Event] = {}
+_CANCEL_LOCK = threading.Lock()
+
+
+def register_coach_upload_cancel(session_id: Any) -> threading.Event:
+    """Create (or reset) the cancel flag for a coach-upload run."""
+    event = threading.Event()
+    if session_id:
+        with _CANCEL_LOCK:
+            _CANCEL_EVENTS[str(session_id)] = event
+    return event
+
+
+def request_coach_upload_cancel(session_id: Any) -> bool:
+    """Signal a running coach-upload to stop early. Returns True if one was live."""
+    if not session_id:
+        return False
+    with _CANCEL_LOCK:
+        event = _CANCEL_EVENTS.get(str(session_id))
+    if event is None:
+        return False
+    event.set()
+    return True
+
+
+def clear_coach_upload_cancel(session_id: Any) -> None:
+    if not session_id:
+        return
+    with _CANCEL_LOCK:
+        _CANCEL_EVENTS.pop(str(session_id), None)
 
 
 class WebRequestHandler(BaseHTTPRequestHandler):
@@ -106,6 +142,13 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 payload = self.read_json()
                 result = asyncio.run(coach_uploaded_audio(payload))
                 self.send_json(result)
+                return
+            if parsed.path == "/api/coach-upload/cancel":
+                payload = self.read_json()
+                cancelled = request_coach_upload_cancel(payload.get("sessionId"))
+                if cancelled:
+                    append_event(payload.get("sessionId"), "coach_upload_cancel_requested", {})
+                self.send_json({"ok": True, "cancelled": cancelled})
                 return
             if parsed.path == "/api/logs/clear":
                 payload = self.read_json()
@@ -345,6 +388,7 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
     if not path.exists() or not path.is_file():
         raise ValueError("Uploaded audio file does not exist.")
 
+    cancel_event = register_coach_upload_cancel(session_id)
     append_event(
         session_id,
         "coach_upload_started",
@@ -436,8 +480,13 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
         )
     )
 
+    cancelled = False
     try:
         async for event in engine.transcribe():
+            if cancel_event.is_set():
+                cancelled = True
+                append_event(session_id, "coach_upload_cancelled", {"events": event_index})
+                break
             event_index += 1
             new_text = cursor.diff(event.text).strip()
             if not new_text:
@@ -460,16 +509,25 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
                 buffer.clear()
                 last_eval_elapsed = elapsed_seconds
     finally:
-        if buffer:
+        # On early termination we stop feeding the coach (no final flush);
+        # otherwise run a last eval on the trailing buffer. Either way we drain
+        # whatever is already queued so the worker shuts down cleanly and the
+        # partial transcript/alerts are complete up to the stop point.
+        if buffer and not cancelled:
             await enqueue_eval("\n".join(buffer), time.perf_counter() - started)
         await eval_queue.join()
         await eval_queue.put(None)
         await worker
+        clear_coach_upload_cancel(session_id)
 
     session_dir = resolve_session_dir(session_id)
     transcript = "\n".join(transcript_parts)
     (session_dir / "uploaded_audio_transcript.txt").write_text(transcript, encoding="utf-8")
-    append_event(session_id, "asr_completed", {"events": event_index, "transcriptChars": len(transcript)})
+    append_event(
+        session_id,
+        "asr_completed",
+        {"events": event_index, "transcriptChars": len(transcript), "cancelled": cancelled},
+    )
     if llm_errors:
         unique_errors = sorted(set(llm_errors))
         append_event(session_id, "llm_errors", {"count": len(llm_errors), "uniqueErrors": unique_errors[:5]})
@@ -480,10 +538,16 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
     append_event(
         session_id,
         "coach_upload_completed",
-        {"audioPath": str(path), "transcriptChars": len(transcript), "alerts": len(alerts)},
+        {
+            "audioPath": str(path),
+            "transcriptChars": len(transcript),
+            "alerts": len(alerts),
+            "cancelled": cancelled,
+        },
     )
     return {
         "ok": True,
+        "cancelled": cancelled,
         "transcript": transcript,
         "alerts": alerts,
         "debugRecords": debug_records,

@@ -43,8 +43,8 @@ def test_default_config_is_llm_with_prompt() -> None:
 
 def test_root_serves_backend_not_pure_frontend(server: str) -> None:
     body = _get(server + "/")
-    assert "前台 + 薄后台代理版" in body  # backend.html topbar marker
-    assert 'src="./backend.js"' in body
+    assert 'src="./backend.js"' in body  # backend.html loads the thin-backend script
+    assert "提前终止" in body  # upload-mode early-termination button is present
 
 
 def test_index_redirects_to_backend(server: str) -> None:
@@ -57,3 +57,30 @@ def test_default_config_endpoint(server: str) -> None:
     data = json.loads(_get(server + "/api/default-config"))
     assert data["coachEngine"] == "llm"
     assert data["prompt"].strip()
+
+
+def _post(url: str, payload: dict) -> dict:
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def test_cancel_registry_round_trip() -> None:
+    session_id = "test-cancel-session"
+    web.clear_coach_upload_cancel(session_id)
+    # No live run yet -> nothing to cancel.
+    assert web.request_coach_upload_cancel(session_id) is False
+    event = web.register_coach_upload_cancel(session_id)
+    assert not event.is_set()
+    # A live run exists -> cancel signals its event.
+    assert web.request_coach_upload_cancel(session_id) is True
+    assert event.is_set()
+    web.clear_coach_upload_cancel(session_id)
+    assert web.request_coach_upload_cancel(session_id) is False
+
+
+def test_cancel_endpoint_reports_no_live_run(server: str) -> None:
+    # Cancelling a session with no in-flight coach-upload is a no-op, not an error.
+    result = _post(server + "/api/coach-upload/cancel", {"sessionId": "missing-session"})
+    assert result == {"ok": True, "cancelled": False}
