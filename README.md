@@ -96,6 +96,11 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
     按钮。点击后 `POST /api/coach-upload/cancel` 给该 session 置取消标志，后台在下一个 ASR
     事件处停止推流与 Copilot 评估，并把已转写部分正常落盘（`uploaded_audio_transcript.txt`、
     `coach_upload_completed{cancelled:true}`）。因此随后导出的诊断包即为「截止到终止时刻」的数据。
+  - **单运行保护（同一 session 不并发）**：上传转写按实时配速可耗时数分钟，旧版「开始转写并运行
+    pilot」按钮在上传阶段仍可点，重复点击会对同一 session 起多个并发运行，各自按自己的音频时钟出
+    提醒、写进同一份日志，导致提醒 `elapsedMinutes` 乱序（实测 2,8,2,2,7）。现做两层防护：前端按钮
+    **点击瞬间置灰**（覆盖整个上传+转写阶段，本次运行结束才恢复）；后端对同一 sessionId 的二次
+    `POST /api/coach-upload` 直接拒绝（`409 AlreadyRunning`，记 `coach_upload_rejected` 事件）。
   - **带 `[MM:SS]` 时间戳的逐字稿**：每次音频/录音转写都会在 session 目录额外落盘
     `uploaded_audio_transcript_timestamped.txt`（随诊断包导出）。它**按 Copilot 实际评估的窗口**
     分段，行首 `[MM:SS]` 是该窗口的音频时间位置。把它粘进「逐字稿调试」运行时，后台用

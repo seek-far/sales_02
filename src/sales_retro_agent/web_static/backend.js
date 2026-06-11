@@ -189,22 +189,29 @@ async function saveAudioFile() {
 }
 
 async function coachAudioFile() {
-  if (!state.lastUploadedAudio) await saveAudioFile();
-  setUploadStatus("正在转写并运行 Copilot。为保证完整性，上传录音会按真实音频时长推流...");
+  // Disable the button on the very first click — BEFORE the (possibly multi-minute)
+  // upload — so a frozen-looking save can't be re-clicked into concurrent runs.
+  // The button stays disabled until this run returns (success, 提前终止, or error)
+  // and is restored only in the outer finally.
   setCoachAudioRunning(true);
-  const poller = setInterval(() => refreshLog().catch(console.error), 3000);
   try {
-    const result = await api("/api/coach-upload", {
-      sessionId: state.sessionId,
-      path: state.lastUploadedAudio,
-      config: getConfig(),
-    });
-    renderAlerts(result.alerts || []);
-    await refreshLog();
-    const prefix = result.cancelled ? "已提前终止" : "处理完成";
-    setUploadStatus(`${prefix}：转写 ${result.transcript?.length || 0} 字，生成 ${result.alerts?.length || 0} 条提醒。`);
+    if (!state.lastUploadedAudio) await saveAudioFile();
+    setUploadStatus("正在转写并运行 Copilot。为保证完整性，上传录音会按真实音频时长推流...");
+    const poller = setInterval(() => refreshLog().catch(console.error), 3000);
+    try {
+      const result = await api("/api/coach-upload", {
+        sessionId: state.sessionId,
+        path: state.lastUploadedAudio,
+        config: getConfig(),
+      });
+      renderAlerts(result.alerts || []);
+      await refreshLog();
+      const prefix = result.cancelled ? "已提前终止" : "处理完成";
+      setUploadStatus(`${prefix}：转写 ${result.transcript?.length || 0} 字，生成 ${result.alerts?.length || 0} 条提醒。`);
+    } finally {
+      clearInterval(poller);
+    }
   } finally {
-    clearInterval(poller);
     setCoachAudioRunning(false);
   }
 }

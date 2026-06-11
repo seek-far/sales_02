@@ -71,6 +71,37 @@ def clear_coach_upload_cancel(session_id: Any) -> None:
         _CANCEL_EVENTS.pop(str(session_id), None)
 
 
+# Per-session single-flight guard: at most one coach-upload may run per session.
+# A slow upload used to leave the run button live with no progress feedback, so
+# users double-clicked and launched concurrent runs over the same session. Each
+# run paces audio on its own clock and writes alerts into the same log, so their
+# alerts interleaved and elapsedMinutes came out non-monotonic (e.g. 2,8,2,2,7).
+# The frontend now disables the button on click; this is the server-side backstop
+# in case a second request still arrives (extra tab, retry, etc.).
+_RUNNING_SESSIONS: set[str] = set()
+_RUNNING_LOCK = threading.Lock()
+
+
+def try_begin_coach_upload(session_id: Any) -> bool:
+    """Reserve a session for a coach-upload run. Returns False if one is already
+    in flight for this session (caller must reject the duplicate request)."""
+    if not session_id:
+        return True
+    with _RUNNING_LOCK:
+        key = str(session_id)
+        if key in _RUNNING_SESSIONS:
+            return False
+        _RUNNING_SESSIONS.add(key)
+    return True
+
+
+def end_coach_upload(session_id: Any) -> None:
+    if not session_id:
+        return
+    with _RUNNING_LOCK:
+        _RUNNING_SESSIONS.discard(str(session_id))
+
+
 class WebRequestHandler(BaseHTTPRequestHandler):
     server_version = "SalesRetroWeb/0.1"
 
@@ -140,7 +171,22 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/coach-upload":
                 payload = self.read_json()
-                result = asyncio.run(coach_uploaded_audio(payload))
+                session_id = payload.get("sessionId")
+                if not try_begin_coach_upload(session_id):
+                    append_event(session_id, "coach_upload_rejected", {"reason": "already_running"})
+                    self.send_json(
+                        {
+                            "ok": False,
+                            "error": "AlreadyRunning",
+                            "message": "该会话已有转写任务在运行，请等待其结束或先点「提前终止」。",
+                        },
+                        status=HTTPStatus.CONFLICT,
+                    )
+                    return
+                try:
+                    result = asyncio.run(coach_uploaded_audio(payload))
+                finally:
+                    end_coach_upload(session_id)
                 self.send_json(result)
                 return
             if parsed.path == "/api/coach-upload/cancel":
