@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 import websockets
+from websockets.exceptions import InvalidHandshake
 
 from .asr_types import TranscriptEvent
 from .config import VolcAsrSettings
@@ -17,6 +18,28 @@ from .volc_protocol import (
     build_full_client_request,
     parse_server_message,
 )
+
+
+def ws_status_code(exc: Exception) -> int | None:
+    """HTTP status from a websockets handshake rejection, across library versions
+    (>=12: ``InvalidStatus(.response.status_code)``; older: ``InvalidStatusCode(.status_code)``)."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status is None:
+        status = getattr(exc, "status_code", None)
+    return status
+
+
+def friendly_ws_error(exc: Exception) -> Exception:
+    """Turn a Volc ASR handshake rejection into an actionable message. A 401/403
+    means the credentials were refused — the most common real-world failure."""
+    status = ws_status_code(exc)
+    if status in (401, 403):
+        return RuntimeError(
+            f"火山 ASR 鉴权失败（HTTP {status}）：请检查火山 ASR 的 API Key 与 Resource ID 是否正确、"
+            "对应的语音识别资源是否仍然有效。"
+        )
+    return exc
 
 
 @dataclass(slots=True)
@@ -53,6 +76,8 @@ class VolcAsrEngine:
     async def _run(self, queue: asyncio.Queue[TranscriptEvent | Exception | None]) -> None:
         try:
             await self._stream(queue)
+        except InvalidHandshake as exc:  # connection refused at handshake (e.g. 401)
+            await queue.put(friendly_ws_error(exc))
         except Exception as exc:  # noqa: BLE001 - forwarded to async iterator consumer
             await queue.put(exc)
         finally:

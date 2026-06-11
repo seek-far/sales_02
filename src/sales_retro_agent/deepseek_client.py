@@ -8,6 +8,18 @@ from .config import Settings
 from .llm_debug import append_debug_record, build_debug_record
 
 
+def friendly_llm_error(exc: Exception) -> Exception:
+    """Turn an LLM API auth failure into an actionable message. A 401/403 from the
+    provider means the key/base-url were refused. Worded as "LLM" (not a fixed
+    vendor) since the engine is pluggable."""
+    status = getattr(exc, "status_code", None)
+    if status in (401, 403):
+        return RuntimeError(
+            f"LLM 鉴权失败（HTTP {status}）：请检查 LLM 的 API Key 与 Base URL 是否正确。"
+        )
+    return exc
+
+
 class DeepSeekClient:
     def __init__(self, settings: Settings, debug_messages_path: Path | None = None):
         self.settings = settings
@@ -15,7 +27,7 @@ class DeepSeekClient:
 
     def complete_json(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         if not self.settings.api_key:
-            raise RuntimeError("Missing DEEPSEEK_API_KEY. Set it in .env or environment variables.")
+            raise RuntimeError("未配置 LLM API Key：请在「Key 设置」中填写后重试。")
 
         if self.debug_messages_path:
             append_debug_record(self.debug_messages_path, build_debug_record(self.settings, messages))
@@ -23,13 +35,16 @@ class DeepSeekClient:
         from openai import OpenAI
 
         client = OpenAI(api_key=self.settings.api_key, base_url=self.settings.base_url)
-        response = client.chat.completions.create(
-            model=self.settings.model,
-            messages=messages,
-            response_format={"type": "json_object"},
-            max_tokens=self.settings.max_tokens,
-            temperature=self.settings.temperature,
-        )
+        try:
+            response = client.chat.completions.create(
+                model=self.settings.model,
+                messages=messages,
+                response_format={"type": "json_object"},
+                max_tokens=self.settings.max_tokens,
+                temperature=self.settings.temperature,
+            )
+        except Exception as exc:  # noqa: BLE001 - map provider auth failures to a friendly message
+            raise friendly_llm_error(exc) from exc
         content = response.choices[0].message.content or ""
         return parse_json_object(content)
 
@@ -37,7 +52,7 @@ class DeepSeekClient:
 def parse_json_object(text: str) -> dict[str, Any]:
     cleaned = text.strip()
     if not cleaned:
-        raise ValueError("DeepSeek response is empty.")
+        raise ValueError("LLM 返回为空。")
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
         cleaned = cleaned.removeprefix("json").strip()
@@ -50,5 +65,5 @@ def parse_json_object(text: str) -> dict[str, Any]:
             raise
         parsed = json.loads(cleaned[start : end + 1])
     if not isinstance(parsed, dict):
-        raise ValueError("DeepSeek response must be a JSON object.")
+        raise ValueError("LLM 返回必须是 JSON 对象。")
     return parsed

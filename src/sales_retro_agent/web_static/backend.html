@@ -84,14 +84,13 @@
           <section class="panel mode-panel" id="uploadPanel">
             <label class="drop-zone">
               <input id="audioFileInput" type="file" accept="audio/*" />
-              <span id="audioFileLabel">选择录音文件</span>
+              <span id="audioFileLabel">上传录音文件</span>
             </label>
             <div class="row">
-              <button id="coachAudioButton">开始转写并运行 Copilot</button>
+              <button id="coachAudioButton" disabled>开始转写并运行 Copilot</button>
               <button id="stopCoachAudioButton" class="danger" hidden>提前终止</button>
-              <button id="saveAudioButton" class="secondary">仅保存到本次日志</button>
             </div>
-            <p class="hint" id="uploadStatus">上传音频会保存到后台 `outputs/web_sessions`。完整转写会按真实音频时长推流。</p>
+            <p class="hint" id="uploadStatus">选择录音文件后会立即上传到后台 `outputs/web_sessions` 并显示进度；上传完成后再「开始转写并运行 Copilot」。</p>
           </section>
 
           <section class="panel mode-panel" id="transcriptPanel">

@@ -7,6 +7,8 @@ const state = {
   timer: null,
   chunks: 0,
   lastUploadedAudio: null,
+  uploading: false,
+  coachRunning: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -174,12 +176,24 @@ async function saveAudioFile() {
   await ensureSession();
   const file = $("audioFileInput").files[0];
   if (!file) throw new Error("请选择录音文件");
+  // Uploading => "开始转写" stays disabled and the upload itself can't be retriggered
+  // until it finishes. lastUploadedAudio is cleared until the new file lands.
+  state.uploading = true;
+  state.lastUploadedAudio = null;
+  updateUploadButtons();
   setUploadStatus(`正在上传 ${file.name}（0%）...`);
-  const result = await uploadAudioRaw(file);
-  state.lastUploadedAudio = result.path;
-  await refreshLog();
-  setUploadStatus(`已保存 ${file.name}，大小 ${(result.bytes / 1024 / 1024).toFixed(2)} MB。`);
-  return result;
+  try {
+    const result = await uploadAudioRaw(file);
+    state.lastUploadedAudio = result.path;
+    await refreshLog();
+    setUploadStatus(
+      `已上传 ${file.name}，大小 ${(result.bytes / 1024 / 1024).toFixed(2)} MB。可点击「开始转写并运行 Copilot」。`,
+    );
+    return result;
+  } finally {
+    state.uploading = false;
+    updateUploadButtons();
+  }
 }
 
 // Raw-binary upload with progress. Sends the File bytes directly instead of
@@ -222,39 +236,42 @@ function uploadAudioRaw(file) {
 }
 
 async function coachAudioFile() {
-  // Disable the button on the very first click — BEFORE the (possibly multi-minute)
-  // upload — so a frozen-looking save can't be re-clicked into concurrent runs.
-  // The button stays disabled until this run returns (success, 提前终止, or error)
-  // and is restored only in the outer finally.
-  setCoachAudioRunning(true);
+  // The button is only enabled once an upload has completed (see updateUploadButtons),
+  // so lastUploadedAudio is set here. Guard anyway, then mark running so the button
+  // stays disabled and 清除日志 is locked until this run returns.
+  if (!state.lastUploadedAudio) throw new Error("请先上传录音文件");
+  state.coachRunning = true;
+  updateUploadButtons();
+  setUploadStatus("正在转写并运行 Copilot。为保证完整性，上传录音会按真实音频时长推流...");
+  const poller = setInterval(() => refreshLog().catch(console.error), 3000);
   try {
-    if (!state.lastUploadedAudio) await saveAudioFile();
-    setUploadStatus("正在转写并运行 Copilot。为保证完整性，上传录音会按真实音频时长推流...");
-    const poller = setInterval(() => refreshLog().catch(console.error), 3000);
-    try {
-      const result = await api("/api/coach-upload", {
-        sessionId: state.sessionId,
-        path: state.lastUploadedAudio,
-        config: getConfig(),
-      });
-      renderAlerts(result.alerts || []);
-      await refreshLog();
-      const prefix = result.cancelled ? "已提前终止" : "处理完成";
-      setUploadStatus(`${prefix}：转写 ${result.transcript?.length || 0} 字，生成 ${result.alerts?.length || 0} 条提醒。`);
-    } finally {
-      clearInterval(poller);
-    }
+    const result = await api("/api/coach-upload", {
+      sessionId: state.sessionId,
+      path: state.lastUploadedAudio,
+      config: getConfig(),
+    });
+    renderAlerts(result.alerts || []);
+    await refreshLog();
+    const prefix = result.cancelled ? "已提前终止" : "处理完成";
+    setUploadStatus(`${prefix}：转写 ${result.transcript?.length || 0} 字，生成 ${result.alerts?.length || 0} 条提醒。`);
   } finally {
-    setCoachAudioRunning(false);
+    clearInterval(poller);
+    state.coachRunning = false;
+    updateUploadButtons();
   }
 }
 
-function setCoachAudioRunning(running) {
-  $("coachAudioButton").disabled = running;
-  $("saveAudioButton").disabled = running;
+// Single source of truth for the upload-panel button states.
+function updateUploadButtons() {
+  // 开始转写: only after a completed upload, and never while uploading/running.
+  $("coachAudioButton").disabled = !state.lastUploadedAudio || state.uploading || state.coachRunning;
+  // 提前终止: shown only while a run is in flight.
   const stopButton = $("stopCoachAudioButton");
-  stopButton.hidden = !running;
+  stopButton.hidden = !state.coachRunning;
   stopButton.disabled = false;
+  // 清除日志: locked while uploading/running — clearing mid-run nukes the session
+  // dir being written and the live sessionId, which used to break 提前终止.
+  $("clearLogButton").disabled = state.uploading || state.coachRunning;
 }
 
 async function stopCoachAudioFile() {
@@ -308,18 +325,32 @@ async function refreshLog() {
 }
 
 async function exportDiagnostics() {
-  await ensureSession();
+  // Don't ensureSession here — a blank session would create an empty one just to
+  // export nothing. Require a real session instead.
+  if (!state.sessionId) {
+    setUploadStatus("还没有可导出的会话，请先上传并运行一次。");
+    return;
+  }
   window.location.href = `/api/diagnostics?sessionId=${encodeURIComponent(state.sessionId)}`;
 }
 
 async function clearLogs() {
   if (!state.sessionId) return;
+  // Never clear mid-run: the backend would rmtree the session dir it's still
+  // writing, and dropping sessionId breaks 提前终止. The button is disabled then,
+  // this is the in-code backstop.
+  if (state.coachRunning || state.uploading) return;
   await api("/api/logs/clear", { sessionId: state.sessionId });
   state.sessionId = "";
   state.lastUploadedAudio = null;
+  $("audioFileInput").value = "";
+  $("audioFileLabel").textContent = "上传录音文件";
   $("sessionLabel").textContent = "未开始";
   $("logOutput").textContent = "";
-  renderAlerts([]);
+  setUploadStatus("日志已清除。");
+  updateUploadButtons();
+  // Intentionally keep the Copilot 提醒 panel: alerts are the run's output, not
+  // process logs — clearing the log shouldn't wipe results the user is reading.
 }
 
 function escapeHtml(value) {
@@ -360,13 +391,21 @@ function wireEvents() {
   $("audioFileInput").addEventListener("change", (event) => {
     const file = event.target.files[0];
     state.lastUploadedAudio = null;
-    $("audioFileLabel").textContent = file ? `${file.name} - ${(file.size / 1024 / 1024).toFixed(2)} MB` : "选择录音文件";
-    setUploadStatus(file ? "已选择文件，点击保存或直接运行 Copilot。" : "上传音频会保存到后台 `outputs/web_sessions`。");
+    updateUploadButtons();
+    $("audioFileLabel").textContent = file
+      ? `${file.name} - ${(file.size / 1024 / 1024).toFixed(2)} MB`
+      : "上传录音文件";
+    if (file) {
+      // Selecting a file uploads it immediately (with progress), so the user
+      // doesn't have to remember a separate save/upload step.
+      saveAudioFile().catch(showError);
+    } else {
+      setUploadStatus("上传音频会保存到后台 `outputs/web_sessions`。");
+    }
   });
   $("recordButton").addEventListener("click", () => {
     (state.mediaRecorder ? stopRecording() : startRecording()).catch(showError);
   });
-  $("saveAudioButton").addEventListener("click", () => saveAudioFile().catch(showError));
   $("coachAudioButton").addEventListener("click", () => coachAudioFile().catch(showError));
   $("stopCoachAudioButton").addEventListener("click", () => stopCoachAudioFile().catch(showError));
   $("coachTranscriptButton").addEventListener("click", () => coachTranscript().catch(showError));
@@ -385,3 +424,4 @@ function showError(error) {
 loadConfig();
 loadDefaultConfig().catch(showError);
 wireEvents();
+updateUploadButtons();

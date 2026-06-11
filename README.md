@@ -98,6 +98,14 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
     保存明显更快。前端用 `XMLHttpRequest` 的 `upload.progress` 显示「正在上传 xx%」，避免上传期间
     面板像卡死（旧版正是因为看不到进度被反复点击，才起了并发运行）。旧的 base64 JSON 体仍兼容
     （实时录音分块 `/api/audio-chunk` 继续用 base64）。
+  - **选文件即上传**：上传面板选中录音文件后**立即**自动上传（带进度），不需要单独的保存步骤
+    （旧的「仅保存到本次日志」按钮已移除）。「开始转写并运行 Copilot」只在**上传完成后**才可点；
+    未选文件 / 上传中一律 disabled，从源头杜绝「没传完就开跑」。
+  - **运行/上传中锁定「清除日志」**：转写或上传进行中，「清除日志」按钮 disabled，后端
+    `POST /api/logs/clear` 对在跑的 session 也直接拒绝（`409 Running`）。否则中途清日志会 `rmtree`
+    正在写入的 session 目录、并清空前端 `sessionId`，导致「提前终止」失效、UI 卡在「正在提前终止」。
+  - **「清除日志」不清提醒**：清除日志只重置过程日志与会话，**保留 Copilot 提醒区**（提醒是结果产出，
+    不应随日志一起抹掉）；「导出诊断包」在无会话时给出提示，而非凭空建一个空 session。
   - **「提前终止」**：因转写按实时配速、长音频耗时长，上传面板在运行期间显示「提前终止」
     按钮。点击后 `POST /api/coach-upload/cancel` 给该 session 置取消标志，后台在下一个 ASR
     事件处停止推流与 Copilot 评估，并把已转写部分正常落盘（`uploaded_audio_transcript.txt`、
@@ -107,6 +115,10 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
     提醒、写进同一份日志，导致提醒 `elapsedMinutes` 乱序（实测 2,8,2,2,7）。现做两层防护：前端按钮
     **点击瞬间置灰**（覆盖整个上传+转写阶段，本次运行结束才恢复）；后端对同一 sessionId 的二次
     `POST /api/coach-upload` 直接拒绝（`409 AlreadyRunning`，记 `coach_upload_rejected` 事件）。
+  - **鉴权错误友好化**：火山 ASR 握手被拒（`401/403`）由 `asr_volc.friendly_ws_error` 转成「火山 ASR
+    鉴权失败：请检查 Key 与 Resource ID」；LLM API 鉴权失败（`401/403`）由 `deepseek_client.friendly_llm_error`
+    转成「LLM 鉴权失败：请检查 Key 与 Base URL」——措辞用中性的「LLM」而非写死某家厂商。非鉴权错误原样透传，
+    不掩盖真实原因。
   - **带 `[MM:SS]` 时间戳的逐字稿**：每次音频/录音转写都会在 session 目录额外落盘
     `uploaded_audio_transcript_timestamped.txt`（随诊断包导出）。它**按 Copilot 实际评估的窗口**
     分段，行首 `[MM:SS]` 是该窗口的音频时间位置。把它粘进「逐字稿调试」运行时，后台用

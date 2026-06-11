@@ -102,6 +102,15 @@ def end_coach_upload(session_id: Any) -> None:
         _RUNNING_SESSIONS.discard(str(session_id))
 
 
+def is_coach_upload_running(session_id: Any) -> bool:
+    """True if a coach-upload run is in flight for this session. Used to refuse
+    clearing logs mid-run (that would rmtree the session dir being written)."""
+    if not session_id:
+        return False
+    with _RUNNING_LOCK:
+        return str(session_id) in _RUNNING_SESSIONS
+
+
 class WebRequestHandler(BaseHTTPRequestHandler):
     server_version = "SalesRetroWeb/0.1"
 
@@ -212,7 +221,18 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/logs/clear":
                 payload = self.read_json()
-                clear_logs(payload.get("sessionId"))
+                session_id = payload.get("sessionId")
+                if is_coach_upload_running(session_id):
+                    self.send_json(
+                        {
+                            "ok": False,
+                            "error": "Running",
+                            "message": "转写运行中，请先「提前终止」再清除日志。",
+                        },
+                        status=HTTPStatus.CONFLICT,
+                    )
+                    return
+                clear_logs(session_id)
                 self.send_json({"ok": True})
                 return
         except Exception as exc:  # noqa: BLE001 - HTTP boundary returns structured errors

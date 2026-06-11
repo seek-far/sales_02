@@ -10,7 +10,13 @@ in-flight run per session (backend, guarded here).
 """
 from __future__ import annotations
 
+import json
 import threading
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+
+import pytest
 
 from sales_retro_agent import web
 
@@ -79,3 +85,56 @@ def test_guard_is_thread_safe_under_concurrent_begins() -> None:
 
     assert sum(1 for w in wins if w) == 1
     _reset(sid)
+
+
+def test_is_coach_upload_running_reflects_registry() -> None:
+    sid = "sess-running"
+    _reset(sid)
+    assert web.is_coach_upload_running(sid) is False
+    web.try_begin_coach_upload(sid)
+    assert web.is_coach_upload_running(sid) is True
+    web.end_coach_upload(sid)
+    assert web.is_coach_upload_running(sid) is False
+    # No session id is never "running".
+    assert web.is_coach_upload_running(None) is False
+
+
+@pytest.fixture()
+def server():
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), web.WebRequestHandler)
+    port = httpd.server_address[1]
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def _post(url: str, payload: dict):
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        return resp.status, json.loads(resp.read().decode("utf-8"))
+
+
+def test_clear_logs_refused_while_run_in_flight(server: str) -> None:
+    # Clearing mid-run would rmtree the session dir being written and drop the
+    # live sessionId, which broke 提前终止. The endpoint must refuse with 409.
+    sid = "sess-clear-guard"
+    _reset(sid)
+    web.try_begin_coach_upload(sid)
+    try:
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            _post(server + "/api/logs/clear", {"sessionId": sid})
+        assert excinfo.value.code == 409
+        body = json.loads(excinfo.value.read().decode("utf-8"))
+        assert body["ok"] is False
+        assert body["error"] == "Running"
+    finally:
+        web.end_coach_upload(sid)
+    # Once the run ends, clearing is allowed again (no dir => harmless no-op).
+    status, result = _post(server + "/api/logs/clear", {"sessionId": sid})
+    assert status == 200
+    assert result == {"ok": True}
