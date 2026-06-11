@@ -92,6 +92,12 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
   timeout` 超时断连。发包按**音频原始速度**配速（`realtime=True`）：火山 SAUC 是
   流式引擎，按收包节奏出结果；若全速一次性灌入会冲垮其缓冲区，只识别开头几秒就
   收尾（实测 113 分钟音频只出 608 字）。因此上传一段 N 分钟音频，转写约需 N 分钟。
+  - **上传走生二进制直送 + 进度条**：文件以原始字节 `POST /api/audio-upload`（`Content-Type`
+    非 JSON 即走二进制分支，文件名/sessionId/mimeType 走 `X-File-Name`/`X-Session-Id`/`X-File-Type`
+    头、URL 编码），不再 base64-in-JSON——省掉约 33% 体积膨胀和构建/解析巨型字符串的开销，大文件
+    保存明显更快。前端用 `XMLHttpRequest` 的 `upload.progress` 显示「正在上传 xx%」，避免上传期间
+    面板像卡死（旧版正是因为看不到进度被反复点击，才起了并发运行）。旧的 base64 JSON 体仍兼容
+    （实时录音分块 `/api/audio-chunk` 继续用 base64）。
   - **「提前终止」**：因转写按实时配速、长音频耗时长，上传面板在运行期间显示「提前终止」
     按钮。点击后 `POST /api/coach-upload/cancel` 给该 session 置取消标志，后台在下一个 ASR
     事件处停止推流与 Copilot 评估，并把已转写部分正常落盘（`uploaded_audio_transcript.txt`、

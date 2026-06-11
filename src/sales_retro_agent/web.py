@@ -18,7 +18,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from .asr_volc import VolcAsrEngine
 from .audio_sources import TARGET_RATE, decode_file_to_pcm16, iter_pcm_chunks
@@ -155,12 +155,26 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 self.send_json(result)
                 return
             if parsed.path == "/api/audio-upload":
-                payload = self.read_json()
-                result = save_audio_blob(payload, folder="uploads")
+                # Raw-binary upload by default: the browser POSTs the file bytes
+                # directly (not base64-in-JSON), so there's no ~33% inflation and
+                # no giant string to build/parse — large recordings save far
+                # faster. Metadata rides in headers. A JSON body is still accepted
+                # for backward compatibility.
+                ctype = self.headers.get("Content-Type", "")
+                if ctype.startswith("application/json"):
+                    payload = self.read_json()
+                    session_id = payload.get("sessionId")
+                    mime_type = payload.get("mimeType", "")
+                    result = save_audio_blob(payload, folder="uploads")
+                else:
+                    session_id = unquote(self.headers.get("X-Session-Id", ""))
+                    file_name = unquote(self.headers.get("X-File-Name", "") or "upload.webm")
+                    mime_type = unquote(self.headers.get("X-File-Type", ""))
+                    result = save_audio_bytes(session_id, file_name, self.read_body(), folder="uploads")
                 append_event(
-                    payload.get("sessionId"),
+                    session_id,
                     "audio_upload_saved",
-                    {"path": result["path"], "bytes": result["bytes"], "mimeType": payload.get("mimeType", "")},
+                    {"path": result["path"], "bytes": result["bytes"], "mimeType": mime_type},
                 )
                 self.send_json(result)
                 return
@@ -215,6 +229,13 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             )
             return
         self.send_error(HTTPStatus.NOT_FOUND)
+
+    def read_body(self) -> bytes:
+        """Read the raw request body (used by the binary audio-upload path)."""
+        length = int(self.headers.get("Content-Length", "0"))
+        if length > MAX_JSON_BYTES:
+            raise ValueError("Request body is too large.")
+        return self.rfile.read(length) if length else b""
 
     def read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
@@ -349,19 +370,29 @@ def clear_logs(session_id: str | None) -> None:
         shutil.rmtree(SESSION_ROOT)
 
 
-def save_audio_blob(payload: dict[str, Any], *, folder: str) -> dict[str, Any]:
-    session_dir = resolve_session_dir(payload.get("sessionId"))
+def save_audio_bytes(
+    session_id: Any, file_name: Any, data: bytes, *, folder: str
+) -> dict[str, Any]:
+    """Write already-decoded audio bytes into ``<session>/<folder>/<name>``.
+    Shared by the base64 (realtime chunk) and raw-binary (file upload) paths."""
+    session_dir = resolve_session_dir(session_id)
     target_dir = session_dir / folder
     target_dir.mkdir(parents=True, exist_ok=True)
+    name = safe_filename(str(file_name or "upload.webm"))
+    path = target_dir / name
+    path.write_bytes(data)
+    return {"ok": True, "path": str(path), "bytes": len(data)}
+
+
+def save_audio_blob(payload: dict[str, Any], *, folder: str) -> dict[str, Any]:
+    """base64-in-JSON save path. Used by realtime recording chunks, which are
+    small. File uploads use the raw-binary path instead (no 33% base64 inflation)."""
     raw_name = str(payload.get("fileName") or f"audio_{payload.get('chunkIndex', 'upload')}.webm")
-    name = safe_filename(raw_name)
     audio_base64 = str(payload.get("audioBase64") or "")
     if "," in audio_base64:
         audio_base64 = audio_base64.split(",", 1)[1]
     data = base64.b64decode(audio_base64)
-    path = target_dir / name
-    path.write_bytes(data)
-    return {"ok": True, "path": str(path), "bytes": len(data)}
+    return save_audio_bytes(payload.get("sessionId"), raw_name, data, folder=folder)
 
 
 # A [MM:SS] marker at the start of a line opens a new eval window; minutes may be
