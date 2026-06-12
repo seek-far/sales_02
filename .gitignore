@@ -22,3 +22,5 @@ outputs/
 /*.md
 
 uv.lock
+
+/.*_resume

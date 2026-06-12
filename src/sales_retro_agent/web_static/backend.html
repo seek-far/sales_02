@@ -129,7 +129,6 @@
       <form method="dialog" class="modal">
         <div class="panel-head">
           <h2>Key 配置</h2>
-          <button value="cancel" class="icon-button">关闭</button>
         </div>
         <label>DeepSeek API Key <input id="deepseekKeyInput" type="password" autocomplete="off" /></label>
         <label>DeepSeek Base URL <input id="deepseekBaseUrlInput" value="https://api.deepseek.com" /></label>
@@ -138,6 +137,7 @@
         <label>火山 ASR Resource ID <input id="volcResourceInput" value="volc.seedasr.sauc.duration" /></label>
         <label>火山 ASR WebSocket URL <input id="volcWsInput" value="wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async" /></label>
         <menu>
+          <button value="cancel" class="secondary">关闭(不保存)</button>
           <button id="saveKeysButton" value="default">保存</button>
         </menu>
       </form>
