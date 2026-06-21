@@ -42,12 +42,14 @@ def test_finish_work_hooked_into_all_three_end_paths():
     assert "async function finishWork()" in BACKEND_JS
 
 
-def test_export_is_awaitable_not_a_navigation():
-    # The 收尾 clears the session right after export; export must complete first,
-    # so it can't be a fire-and-forget window.location navigation.
+def test_export_downloads_via_navigation_with_atomic_clear():
+    # Download is a navigation (anchor href), NOT fetch+Blob — the latter silently
+    # failed behind the HTTPS proxy. The rmtree-vs-zip race is handled server-side
+    # via clearAfter (atomic export+clear), so the client needn't await the download.
     assert "window.location.href" not in BACKEND_JS
-    assert "async function downloadDiagnostics()" in BACKEND_JS
-    assert "await downloadDiagnostics()" in BACKEND_JS
+    assert "URL.createObjectURL" not in BACKEND_JS  # no blob download
+    assert "clearAfter" in BACKEND_JS
+    assert "downloadDiagnostics({ clearAfter: true })" in BACKEND_JS
 
 
 def test_clear_logs_alerts_are_opt_in():

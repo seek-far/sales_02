@@ -390,28 +390,32 @@ async function refreshLog() {
 // Fetch the zip fully into the browser before returning. Using fetch+Blob (not
 // a fire-and-forget page navigation) lets finishWork await a real completion, so
 // the server-side session dir survives until the download is in hand before any clear.
-async function downloadDiagnostics() {
-  const res = await fetch(`/api/diagnostics?sessionId=${encodeURIComponent(state.sessionId)}`);
-  if (!res.ok) throw new Error(`导出失败（${res.status}）`);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
+// Download via a navigation (anchor href), NOT fetch+Blob. The browser's download
+// manager handles basic-auth, gzip, large files and slow links, and needs no live
+// user activation after an await — behind the HTTPS proxy (Caddy) the fetch+Blob
+// variant silently downloaded nothing. clearAfter lets the server clear the session
+// atomically *after* building the zip in memory, so there's no rmtree-vs-zip race
+// and the client doesn't need to await completion.
+function downloadDiagnostics({ clearAfter = false } = {}) {
+  const url =
+    `/api/diagnostics?sessionId=${encodeURIComponent(state.sessionId)}` +
+    (clearAfter ? "&clearAfter=1" : "");
   const a = document.createElement("a");
   a.href = url;
-  a.download = `diagnostics_${state.sessionId}.zip`;
+  a.download = "";
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
 }
 
-async function exportDiagnostics() {
+function exportDiagnostics() {
   // Don't ensureSession here — a blank session would create an empty one just to
   // export nothing. Require a real session instead.
   if (!state.sessionId) {
     setUploadStatus("还没有可导出的会话，请先上传并运行一次。");
     return;
   }
-  await downloadDiagnostics();
+  downloadDiagnostics();
 }
 
 // Resolves true if the user chose to export. The dialog warns that skipping
@@ -440,8 +444,14 @@ async function finishWork() {
   }
   try {
     const wantExport = await askExportDialog();
-    if (wantExport) await downloadDiagnostics();
-    await clearLogs({ clearAlerts: true });
+    if (wantExport) {
+      // Server clears the session atomically after zipping (clearAfter), so we
+      // just kick off the navigation download and reset the UI — no await, no race.
+      downloadDiagnostics({ clearAfter: true });
+      resetSessionUI({ clearAlerts: true });
+    } else {
+      await clearLogs({ clearAlerts: true });
+    }
   } catch (err) {
     showError(err);
   } finally {
@@ -452,6 +462,24 @@ async function finishWork() {
 // clearAlerts is false for the manual 清除日志 button (alerts are the run's
 // output, not process logs — keep them) and true for the end-of-work 收尾, whose
 // whole point is to not mix this run's results with the next.
+// Frontend-only reset of session state + panels. Used both after a server clear
+// and after an atomic export+clear (clearAfter), where the server already removed
+// the session dir so there's nothing more to call.
+function resetSessionUI({ clearAlerts = false } = {}) {
+  state.sessionId = "";
+  state.lastUploadedAudio = null;
+  $("audioFileInput").value = "";
+  $("audioFileLabel").textContent = "上传录音文件";
+  $("sessionLabel").textContent = "未开始";
+  $("logOutput").textContent = "";
+  if (clearAlerts) {
+    $("alertCount").textContent = "0 条";
+    $("alerts").className = "alerts empty";
+    $("alerts").textContent = "暂无提醒";
+  }
+  updateUploadButtons();
+}
+
 async function clearLogs({ clearAlerts = false } = {}) {
   if (!state.sessionId) return;
   // Never clear mid-run: the backend would rmtree the session dir it's still
@@ -459,19 +487,8 @@ async function clearLogs({ clearAlerts = false } = {}) {
   // this is the in-code backstop.
   if (isBusy()) return;
   await api("/api/logs/clear", { sessionId: state.sessionId });
-  state.sessionId = "";
-  state.lastUploadedAudio = null;
-  $("audioFileInput").value = "";
-  $("audioFileLabel").textContent = "上传录音文件";
-  $("sessionLabel").textContent = "未开始";
-  $("logOutput").textContent = "";
+  resetSessionUI({ clearAlerts });
   setUploadStatus("日志已清除。");
-  if (clearAlerts) {
-    $("alertCount").textContent = "0 条";
-    $("alerts").className = "alerts empty";
-    $("alerts").textContent = "暂无提醒";
-  }
-  updateUploadButtons();
 }
 
 function escapeHtml(value) {
@@ -533,7 +550,7 @@ function wireEvents() {
   $("stopCoachAudioButton").addEventListener("click", () => stopCoachAudioFile().catch(showError));
   $("coachTranscriptButton").addEventListener("click", () => coachTranscript().catch(showError));
   $("refreshLogButton").addEventListener("click", () => refreshLog().catch(showError));
-  $("exportDiagButton").addEventListener("click", () => exportDiagnostics().catch(showError));
+  $("exportDiagButton").addEventListener("click", () => exportDiagnostics());
   $("clearLogButton").addEventListener("click", () => clearLogs().catch(showError));
 }
 

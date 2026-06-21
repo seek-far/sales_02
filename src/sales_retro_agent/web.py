@@ -130,7 +130,8 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/diagnostics":
             query = parse_qs(parsed.query)
             session_id = first(query.get("sessionId"))
-            self.send_diagnostics(session_id)
+            clear_after = str(first(query.get("clearAfter")) or "").lower() in ("1", "true", "yes")
+            self.send_diagnostics(session_id, clear_after=clear_after)
             return
         self.send_static(parsed.path)
 
@@ -299,7 +300,7 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_diagnostics(self, session_id: str | None) -> None:
+    def send_diagnostics(self, session_id: str | None, clear_after: bool = False) -> None:
         session_dir = resolve_session_dir(session_id)
         if not session_dir.exists():
             raise ValueError("Session does not exist.")
@@ -309,6 +310,14 @@ class WebRequestHandler(BaseHTTPRequestHandler):
                 if path.is_file() and path.name != package_path.name:
                     package.write(path, path.relative_to(session_dir))
         body = package_path.read_bytes()
+        # Atomic export+clear: the zip is fully in memory now, so clearing the
+        # session dir here cannot corrupt the download. Doing it inside this one
+        # request (instead of a concurrent /api/logs/clear) removes the
+        # rmtree-vs-zip race on ThreadingHTTPServer — that race is why the
+        # browser-side fetch+Blob "await then clear" was needed, which itself
+        # silently failed behind the HTTPS proxy. Now the client just navigates.
+        if clear_after and session_id and not is_coach_upload_running(session_id):
+            clear_logs(session_id)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", f'attachment; filename="sales-retro-{session_dir.name}.zip"')

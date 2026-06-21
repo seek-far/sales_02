@@ -113,10 +113,15 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
     日志与会话错位。Tab 既 `disabled` 又在点击处理器内 `isBusy()` 兜底。
   - **结束工作收尾**：每条「结束工作」路径（停止录音 / 上传转写的 `finally`，含正常结束·提前终止·异常 /
     逐字稿运行的 `finally`）统一走 `finishWork()`：弹框问是否「导出诊断包」（文案点明*不导出将不保留本次
-    结果*）→ 选导出则用 **fetch+Blob** 把 zip 完整取回浏览器**再**继续（旧的 `window.location` 跳转无法
-    等待完成，会与随后的清除 `rmtree` 抢同一 session 目录）→ 无条件清除提醒+日志+重置会话 → 解锁 Tab/配置。
-    跨次（如逐字稿调试反复改提示词）的结果对比改由下载的诊断包离线进行。停止录音前会先 `await` 在途
-    切片上传完成，避免最后一片在清除时被删。
+    结果*）→ 选导出则触发**导航式下载**（`<a download>` 指向 `/api/diagnostics?...&clearAfter=1`）并重置前端
+    UI；不导出则调 `/api/logs/clear` 再重置 → 解锁 Tab/配置。跨次（如逐字稿调试反复改提示词）的结果对比改由
+    下载的诊断包离线进行。停止录音前会先 `await` 在途切片上传完成，避免最后一片在清除时被删。
+  - **导出+清除的原子化（修 Caddy 代理下导不出包）**：清除会 `rmtree` session 目录，与导出打包存在竞态
+    （`ThreadingHTTPServer` 并发）。曾用 **fetch+Blob**「先取回再清」规避，但在 Caddy/HTTPS 代理 + 大文件下
+    **静默失败**（下载在 `await` 之后才触发、丢了用户手势激活；本地 localhost 秒回所以没暴露）。现改为：导出走
+    **浏览器导航下载**（下载管理器原生处理 basicauth/gzip/大文件/慢链路），清除竞态移到**服务端原子处理**——
+    `GET /api/diagnostics?clearAfter=1` 在**把 zip 读进内存后、再 `clear_logs()` 删目录、最后发出内存里的 zip**，
+    单请求内完成，前端无需 `await`，彻底消除竞态。
   - **「提前终止」**：因转写按实时配速、长音频耗时长，上传面板在运行期间显示「提前终止」
     按钮。点击后 `POST /api/coach-upload/cancel` 给该 session 置取消标志，后台在下一个 ASR
     事件处停止推流与 Copilot 评估，并把已转写部分正常落盘（`uploaded_audio_transcript.txt`、
