@@ -374,6 +374,9 @@ def parse_timestamped_transcript(text: str) -> dict[int, str]:
     import re
     from collections import defaultdict
 
+    # Strip Copilot <ALERT>..</ALERT> blocks — they are output embedded in the
+    # diagnostic transcript, not transcript to re-feed the coach.
+    text = re.sub(r"<ALERT>.*?</ALERT>", "", text, flags=re.DOTALL)
     by_minute: defaultdict[int, list[str]] = defaultdict(list)
     for line in text.splitlines():
         m = re.match(r"\[(\d+):(\d+)\]\s*(.*)", line)

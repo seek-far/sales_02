@@ -138,9 +138,10 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
     说话人取自 **`utterances[].additions.speaker_id`**（实测字段名是 `speaker_id`，不是文档写的 `speaker`，且
     只在定稿句出现），按说话人切换插入 `[说话人N]` 前缀（`enable_speaker_labels` 默认开；N 是 ID 不是角色，
     销售/客户映射由使用方决定）。无 `utterances` 的旧变体回退到原 `result.text` 路径。
-    **声纹聚类分离的启用条件**（流式文档）：`enable_speaker_info:true` + `ssd_version:"200"` + language 不指定或
-    `zh-CN`。三者缺一（尤其漏 `ssd_version`）会导致**恒定返回单一说话人 "0"**——init 已补齐这三项。若 `bigmodel_async`
-    属于"双向流式优化接口"，可能还需 `enable_nonstream:true`（待实测；现未加，以免打断已跑通的转写）。
+    **声纹聚类分离的启用条件**（流式文档+实测）：`enable_speaker_info:true` + `ssd_version:"200"` +
+    `enable_nonstream:true`（`bigmodel_async` 属"双向流式优化接口"需要）+ language 不指定或 `zh-CN`。缺任一
+    （尤其漏 `ssd_version`/`enable_nonstream`）会**恒定返回单一说话人 "0"**——四项齐全后实测 `test_01.mp3` 已分出
+    `speaker_id` 0/1/…，且未影响转写。`asr_init_sent` 事件记录实际发送的 request 参数，便于核对开关是否真发出。
   - **鉴权错误友好化**：火山 ASR 握手被拒（`401/403`）由 `asr_volc.friendly_ws_error` 转成「火山 ASR
     鉴权失败：请检查 Key 与 Resource ID」；LLM API 鉴权失败（`401/403`）由 `deepseek_client.friendly_llm_error`
     转成「LLM 鉴权失败：请检查 Key 与 Base URL」——措辞用中性的「LLM」而非写死某家厂商。非鉴权错误原样透传，
@@ -151,6 +152,12 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
     `parse_timestamped_transcript()` 逐窗复现**完全相同**的 `(窗口文本, elapsed_minutes)` 序列
     （`elapsed_minutes = max(1, 秒//60)`，与上传路径同一公式），因此 Copilot 行为与原录音/音频
     文件一致；没有 `[MM:SS]` 标记的普通逐字稿仍按字数分块近似（向后兼容）。
+  - **时间戳逐字稿内嵌 Copilot 提醒（`<ALERT>`）**：上传转写产生的每条 Copilot 提醒（含网页卡片显示的
+    分钟·优先级·类型、message、建议提问、理由）会以 `<ALERT>…</ALERT>` 块写入
+    `uploaded_audio_transcript_timestamped.txt`，**紧跟在产生它的那个 `[MM:SS]` 窗口之后**（按 alert 的
+    `elapsedSeconds` 精确定位，alert 事件已补该字段）。这样诊断包的逐字稿能就地看到"哪段对话触发了哪条提醒"。
+    **「逐字稿调试/分析」回放时会先 `re.sub` 剥掉 `<ALERT>` 块**（`_ALERT_BLOCK_RE`，web.py 与 realtime_runner
+    两处解析器都做），所以提醒只是结果展示、**不会被当作逐字稿重新喂给 Copilot**。
 - **已做 §6 第 1 步解耦**（见 `packaging/PACKAGING_NOTES.md`）：
   - `audio_sources.py` 的 `sounddevice` 改为惰性导入；薄后端导入链不再需要 PortAudio。
   - `pyproject.toml` 已删除指向未复制 `cli.py` 的悬空 `[project.scripts]` 入口。

@@ -419,6 +419,9 @@ def save_audio_blob(payload: dict[str, Any], *, folder: str) -> dict[str, Any]:
 # 3+ digits for long meetings (e.g. [113:20]). Text after the marker (and any
 # following non-marker lines) is that window's content.
 _TIMESTAMP_LINE_RE = re.compile(r"^\[(\d+):([0-5]\d)\][ \t]?(.*)$")
+# Copilot alerts are embedded as <ALERT>..</ALERT> blocks after their window; the
+# replay/分析 path strips them so they are never re-fed to the coach as transcript.
+_ALERT_BLOCK_RE = re.compile(r"<ALERT>.*?</ALERT>", re.DOTALL)
 
 
 def format_mmss(total_seconds: float) -> str:
@@ -426,14 +429,52 @@ def format_mmss(total_seconds: float) -> str:
     return f"[{total // 60:02d}:{total % 60:02d}]"
 
 
-def format_timestamped_transcript(timeline: list[tuple[float, str]]) -> str:
+def format_alert_block(alert: dict[str, Any]) -> str:
+    """Render a Copilot alert as an <ALERT>..</ALERT> block — the same fields the web
+    card shows. The wrapper lets the diagnostic transcript carry the alerts inline
+    while parse_timestamped_transcript skips them on replay (they're output, not input)."""
+    header = " · ".join(
+        str(part)
+        for part in (f"{alert.get('elapsedMinutes', 0)} 分钟", alert.get("priority"), alert.get("type"))
+        if part
+    )
+    lines = ["<ALERT>", header]
+    if alert.get("message"):
+        lines.append(str(alert["message"]))
+    if alert.get("suggested_question"):
+        lines.append(f"建议提问：{alert['suggested_question']}")
+    if alert.get("reason"):
+        lines.append(f"理由：{alert['reason']}")
+    lines.append("</ALERT>")
+    return "\n".join(lines)
+
+
+def format_timestamped_transcript(
+    timeline: list[tuple[float, str]], alerts: list[dict[str, Any]] | None = None
+) -> str:
     """Render eval windows as a [MM:SS] transcript. Window text keeps its newlines
-    so replaying it feeds the coach byte-for-byte what the realtime run saw."""
-    return "\n".join(f"{format_mmss(seconds)} {text}" for seconds, text in timeline)
+    so replaying it feeds the coach byte-for-byte what the realtime run saw. Any
+    alert produced for a window is appended right after it as an <ALERT> block,
+    keyed by the window's elapsedSeconds."""
+    by_window: dict[float, list[dict[str, Any]]] = {}
+    for alert in alerts or []:
+        seconds = alert.get("elapsedSeconds")
+        if seconds is None:
+            continue
+        by_window.setdefault(round(float(seconds), 2), []).append(alert)
+    lines: list[str] = []
+    for seconds, text in timeline:
+        lines.append(f"{format_mmss(seconds)} {text}")
+        for alert in by_window.get(round(float(seconds), 2), []):
+            lines.append(format_alert_block(alert))
+    return "\n".join(lines)
 
 
 def write_upload_transcripts(
-    session_dir: Path, transcript_parts: list[str], eval_timeline: list[tuple[float, str]]
+    session_dir: Path,
+    transcript_parts: list[str],
+    eval_timeline: list[tuple[float, str]],
+    alerts: list[dict[str, Any]] | None = None,
 ) -> None:
     """Persist the plain + [MM:SS] transcripts. Called eagerly on early termination
     (so a download right after 提前终止 already has them) and again at normal end."""
@@ -442,7 +483,7 @@ def write_upload_transcripts(
         "\n".join(transcript_parts), encoding="utf-8"
     )
     (session_dir / "uploaded_audio_transcript_timestamped.txt").write_text(
-        format_timestamped_transcript(eval_timeline), encoding="utf-8"
+        format_timestamped_transcript(eval_timeline, alerts), encoding="utf-8"
     )
 
 
@@ -452,6 +493,9 @@ def parse_timestamped_transcript(transcript: str) -> list[tuple[int, str]] | Non
     Returns ``None`` when the transcript carries no [MM:SS] markers, so callers can
     fall back to plain char-chunking for hand-pasted transcripts.
     """
+    # Drop <ALERT>..</ALERT> blocks: they are Copilot output the diagnostic
+    # transcript carries inline, not transcript to re-feed the coach on replay.
+    transcript = _ALERT_BLOCK_RE.sub("", transcript)
     segments: list[tuple[int, list[str]]] = []
     current_seconds: int | None = None
     current_lines: list[str] = []
@@ -660,7 +704,7 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
                 # Persist transcripts up to *now* before the queue drain (which can
                 # block on an in-flight LLM eval), so a diagnostics download right
                 # after 提前终止 already contains the [MM:SS] transcript.
-                write_upload_transcripts(resolve_session_dir(session_id), transcript_parts, eval_timeline)
+                write_upload_transcripts(resolve_session_dir(session_id), transcript_parts, eval_timeline, alerts)
                 append_event(session_id, "coach_upload_cancelled", {"events": event_index})
                 break
             event_index += 1
@@ -698,7 +742,7 @@ async def coach_uploaded_audio(payload: dict[str, Any]) -> dict[str, Any]:
 
     session_dir = resolve_session_dir(session_id)
     transcript = "\n".join(transcript_parts)
-    write_upload_transcripts(session_dir, transcript_parts, eval_timeline)
+    write_upload_transcripts(session_dir, transcript_parts, eval_timeline, alerts)
     append_event(
         session_id,
         "asr_completed",
@@ -747,6 +791,7 @@ async def run_realtime_llm_worker(
                 return
             text = str(job["text"])
             elapsed_minutes = int(job["elapsedMinutes"])
+            elapsed_seconds = float(job.get("elapsedSeconds", elapsed_minutes * 60))
             state_before = snapshot_state(state)
             append_event(
                 session_id,
@@ -782,7 +827,11 @@ async def run_realtime_llm_worker(
                 "error": llm_error,
             }
             if alert:
-                alert_payload = {"elapsedMinutes": elapsed_minutes, **asdict(alert)}
+                alert_payload = {
+                    "elapsedMinutes": elapsed_minutes,
+                    "elapsedSeconds": round(elapsed_seconds, 2),
+                    **asdict(alert),
+                }
                 alerts.append(alert_payload)
                 append_event(session_id, "coach_alert", alert_payload)
             append_event(session_id, "llm_eval_done", event_payload)
