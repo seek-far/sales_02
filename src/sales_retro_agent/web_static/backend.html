@@ -125,6 +125,19 @@
       </section>
     </main>
 
+    <dialog id="finishDialog">
+      <form method="dialog" class="modal">
+        <div class="panel-head">
+          <h2>本次工作已结束</h2>
+        </div>
+        <p>是否导出本次诊断包？<strong>不导出将不保留本次结果</strong>（提醒与日志会被清除）。</p>
+        <menu>
+          <button value="skip" class="secondary">不导出</button>
+          <button value="export">导出诊断包</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="keyDialog">
       <form method="dialog" class="modal">
         <div class="panel-head">

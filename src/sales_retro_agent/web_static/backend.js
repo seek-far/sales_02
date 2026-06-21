@@ -6,9 +6,12 @@ const state = {
   startedAt: 0,
   timer: null,
   chunks: 0,
+  pendingChunk: null,
   lastUploadedAudio: null,
   uploading: false,
   coachRunning: false,
+  recording: false,
+  transcriptRunning: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -122,26 +125,33 @@ async function startRecording() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const mimeType = pickRecordingMimeType();
   state.mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+  state.recording = true;
   state.startedAt = Date.now();
   state.chunks = 0;
+  state.pendingChunk = null;
   $("chunkCount").textContent = "0";
   $("recordButton").textContent = "停止录音";
   $("recordButton").classList.add("recording");
   setRecordStatus("录音中");
+  updateWorkingLock();
 
-  state.mediaRecorder.addEventListener("dataavailable", async (event) => {
+  state.mediaRecorder.addEventListener("dataavailable", (event) => {
     if (!event.data || event.data.size === 0) return;
-    state.chunks += 1;
-    $("chunkCount").textContent = String(state.chunks);
-    const audioBase64 = await blobToDataUrl(event.data);
-    await api("/api/audio-chunk", {
-      sessionId: state.sessionId,
-      chunkIndex: state.chunks,
-      fileName: `chunk_${String(state.chunks).padStart(4, "0")}.webm`,
-      mimeType: event.data.type,
-      audioBase64,
-    });
-    await refreshLog();
+    // Track the in-flight upload so stopRecording can await the final chunk
+    // before finishWork (which may rmtree the session dir).
+    state.pendingChunk = (async () => {
+      state.chunks += 1;
+      $("chunkCount").textContent = String(state.chunks);
+      const audioBase64 = await blobToDataUrl(event.data);
+      await api("/api/audio-chunk", {
+        sessionId: state.sessionId,
+        chunkIndex: state.chunks,
+        fileName: `chunk_${String(state.chunks).padStart(4, "0")}.webm`,
+        mimeType: event.data.type,
+        audioBase64,
+      });
+      await refreshLog();
+    })();
   });
 
   state.mediaRecorder.addEventListener("stop", () => {
@@ -156,13 +166,29 @@ async function startRecording() {
 
 async function stopRecording() {
   if (!state.mediaRecorder) return;
-  state.mediaRecorder.stop();
+  const recorder = state.mediaRecorder;
   state.mediaRecorder = null;
   clearInterval(state.timer);
+  // stop() fires a final dataavailable then stop; wait for both so the last
+  // chunk is persisted before finishWork potentially clears the session dir.
+  const stopped = new Promise((resolve) => recorder.addEventListener("stop", resolve, { once: true }));
+  recorder.stop();
+  await stopped;
+  if (state.pendingChunk) {
+    try {
+      await state.pendingChunk;
+    } catch (err) {
+      console.error(err);
+    }
+    state.pendingChunk = null;
+  }
   $("recordButton").textContent = "开始录音";
   $("recordButton").classList.remove("recording");
   setRecordStatus("录音已停止");
   await logEvent("recording_stopped", { durationSeconds: Math.round((Date.now() - state.startedAt) / 1000) });
+  // 结束工作：标志清掉后走统一收尾（提醒为空时清提醒是空操作）。
+  state.recording = false;
+  await finishWork();
 }
 
 function updateDuration() {
@@ -180,7 +206,7 @@ async function saveAudioFile() {
   // until it finishes. lastUploadedAudio is cleared until the new file lands.
   state.uploading = true;
   state.lastUploadedAudio = null;
-  updateUploadButtons();
+  updateUploadButtons();  // locks tabs/config too (uploading is a busy state)
   setUploadStatus(`正在上传 ${file.name}（0%）...`);
   try {
     const result = await uploadAudioRaw(file);
@@ -256,8 +282,10 @@ async function coachAudioFile() {
     setUploadStatus(`${prefix}：转写 ${result.transcript?.length || 0} 字，生成 ${result.alerts?.length || 0} 条提醒。`);
   } finally {
     clearInterval(poller);
+    // 结束工作（正常结束 / 提前终止 / 异常都走这里）→ 统一收尾。
     state.coachRunning = false;
     updateUploadButtons();
+    await finishWork();
   }
 }
 
@@ -269,9 +297,36 @@ function updateUploadButtons() {
   const stopButton = $("stopCoachAudioButton");
   stopButton.hidden = !state.coachRunning;
   stopButton.disabled = false;
-  // 清除日志: locked while uploading/running — clearing mid-run nukes the session
-  // dir being written and the live sessionId, which used to break 提前终止.
-  $("clearLogButton").disabled = state.uploading || state.coachRunning;
+  // Global "工作状态" lock (tabs / config / 清除日志) lives in updateWorkingLock.
+  updateWorkingLock();
+}
+
+// True while any mode is mid-work: live recording, file upload, audio coach run,
+// or transcript coach run. Drives the global UI lock.
+function isBusy() {
+  return state.recording || state.uploading || state.coachRunning || state.transcriptRunning;
+}
+
+// Single source of truth for the 工作状态 lock: while busy, freeze the mode tabs
+// and the whole config panel so the user can't switch context or mutate config
+// mid-run, and lock 清除日志 (clearing rmtree's the live session dir).
+function updateWorkingLock() {
+  const busy = isBusy();
+  document.querySelectorAll(".mode-tabs .tab").forEach((tab) => {
+    tab.disabled = busy;
+  });
+  [
+    "saveConfigButton",
+    "promptInput",
+    "importPromptButton",
+    "clearPromptButton",
+    "intervalInput",
+    "coachEngineInput",
+    "openKeyModalButton",
+  ].forEach((id) => {
+    $(id).disabled = busy;
+  });
+  $("clearLogButton").disabled = busy;
 }
 
 async function stopCoachAudioFile() {
@@ -283,13 +338,21 @@ async function stopCoachAudioFile() {
 
 async function coachTranscript() {
   await ensureSession();
-  const result = await api("/api/coach-transcript", {
-    sessionId: state.sessionId,
-    transcript: $("transcriptInput").value,
-    config: getConfig(),
-  });
-  renderAlerts(result.alerts || []);
-  await refreshLog();
+  state.transcriptRunning = true;
+  updateWorkingLock();
+  try {
+    const result = await api("/api/coach-transcript", {
+      sessionId: state.sessionId,
+      transcript: $("transcriptInput").value,
+      config: getConfig(),
+    });
+    renderAlerts(result.alerts || []);
+    await refreshLog();
+  } finally {
+    // 结束工作 → 统一收尾。
+    state.transcriptRunning = false;
+    await finishWork();
+  }
 }
 
 function renderAlerts(alerts) {
@@ -324,6 +387,23 @@ async function refreshLog() {
   if (realtimeAlerts.length) renderAlerts(realtimeAlerts);
 }
 
+// Fetch the zip fully into the browser before returning. Using fetch+Blob (not
+// a fire-and-forget page navigation) lets finishWork await a real completion, so
+// the server-side session dir survives until the download is in hand before any clear.
+async function downloadDiagnostics() {
+  const res = await fetch(`/api/diagnostics?sessionId=${encodeURIComponent(state.sessionId)}`);
+  if (!res.ok) throw new Error(`导出失败（${res.status}）`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `diagnostics_${state.sessionId}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function exportDiagnostics() {
   // Don't ensureSession here — a blank session would create an empty one just to
   // export nothing. Require a real session instead.
@@ -331,15 +411,53 @@ async function exportDiagnostics() {
     setUploadStatus("还没有可导出的会话，请先上传并运行一次。");
     return;
   }
-  window.location.href = `/api/diagnostics?sessionId=${encodeURIComponent(state.sessionId)}`;
+  await downloadDiagnostics();
 }
 
-async function clearLogs() {
+// Resolves true if the user chose to export. The dialog warns that skipping
+// loses the run, since the shared 收尾 clears alerts+logs right after.
+function askExportDialog() {
+  return new Promise((resolve) => {
+    const dialog = $("finishDialog");
+    const onClose = () => {
+      dialog.removeEventListener("close", onClose);
+      resolve(dialog.returnValue === "export");
+    };
+    dialog.addEventListener("close", onClose);
+    dialog.showModal();
+  });
+}
+
+// Shared end-of-work ceremony for all three modes: ask whether to export the
+// diagnostics bundle, await the download if so (so the session dir survives),
+// then clear alerts+logs+session, then unlock tabs/config. Errors never trap the
+// user locked — the finally always unlocks; a failed export keeps the session so
+// it can be retried via the manual 导出 button.
+async function finishWork() {
+  if (!state.sessionId) {
+    updateWorkingLock();
+    return;
+  }
+  try {
+    const wantExport = await askExportDialog();
+    if (wantExport) await downloadDiagnostics();
+    await clearLogs({ clearAlerts: true });
+  } catch (err) {
+    showError(err);
+  } finally {
+    updateWorkingLock();
+  }
+}
+
+// clearAlerts is false for the manual 清除日志 button (alerts are the run's
+// output, not process logs — keep them) and true for the end-of-work 收尾, whose
+// whole point is to not mix this run's results with the next.
+async function clearLogs({ clearAlerts = false } = {}) {
   if (!state.sessionId) return;
   // Never clear mid-run: the backend would rmtree the session dir it's still
   // writing, and dropping sessionId breaks 提前终止. The button is disabled then,
   // this is the in-code backstop.
-  if (state.coachRunning || state.uploading) return;
+  if (isBusy()) return;
   await api("/api/logs/clear", { sessionId: state.sessionId });
   state.sessionId = "";
   state.lastUploadedAudio = null;
@@ -348,9 +466,12 @@ async function clearLogs() {
   $("sessionLabel").textContent = "未开始";
   $("logOutput").textContent = "";
   setUploadStatus("日志已清除。");
+  if (clearAlerts) {
+    $("alertCount").textContent = "0 条";
+    $("alerts").className = "alerts empty";
+    $("alerts").textContent = "暂无提醒";
+  }
   updateUploadButtons();
-  // Intentionally keep the Copilot 提醒 panel: alerts are the run's output, not
-  // process logs — clearing the log shouldn't wipe results the user is reading.
 }
 
 function escapeHtml(value) {
@@ -364,6 +485,8 @@ function escapeHtml(value) {
 function wireEvents() {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
+      // 工作状态中禁止切换 Tab. The button is also disabled then; this is the backstop.
+      if (isBusy()) return;
       document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
       document.querySelectorAll(".mode-panel").forEach((item) => item.classList.remove("active"));
       tab.classList.add("active");
