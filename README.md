@@ -126,6 +126,21 @@ git tag v0.1.0 && git push origin v0.1.0   # 打 v* tag → windows runner 出 s
     提醒、写进同一份日志，导致提醒 `elapsedMinutes` 乱序（实测 2,8,2,2,7）。现做两层防护：前端按钮
     **点击瞬间置灰**（覆盖整个上传+转写阶段，本次运行结束才恢复）；后端对同一 sessionId 的二次
     `POST /api/coach-upload` 直接拒绝（`409 AlreadyRunning`，记 `coach_upload_rejected` 事件）。
+  - **ASR 原始帧捕获（排障用）**：`VolcAsrEngine` 把火山服务端 payload 原样作为 `asr_raw_payload`
+    事件写入 `events.jsonl`（随诊断包导出），用于核对 `result.utterances[].definite`、`additions.speaker`
+    等字段名而无需在 GUI 里抓 stdout。分两桶：前若干**早期（partial）帧** + 首批**含定稿/多 utterance 的帧**
+    （partial→definite 转变处，去重 bug 就在这里）。均有上限，不会撑大日志。已实测确认 `definite` 字段存在。
+  - **转写去重根治 + 说话人标注（`UtteranceAccumulator`）**：火山流式按 `result.utterances[]` 返回，每句带
+    `definite`（false=中间/true=定稿）；定稿时会做 ITN/标点改写（如「90」→「九十」），使顶层累积 `result.text`
+    的前缀**被改写**，旧的 `TranscriptCursor` 因 `startswith` 失败、overlap 又匹配不到而把整句**重复 append**。
+    现改为：引擎只提交 **definite 句**（用稳定的 `(start_time,end_time)` 做键，避免列表滑动时漏/重），committed
+    文本天然只增不改 → 下游 cursor 永不重复；流结束时再 `flush_partial()` 补回最后一个未定稿句，避免丢尾。
+    说话人取自 **`utterances[].additions.speaker_id`**（实测字段名是 `speaker_id`，不是文档写的 `speaker`，且
+    只在定稿句出现），按说话人切换插入 `[说话人N]` 前缀（`enable_speaker_labels` 默认开；N 是 ID 不是角色，
+    销售/客户映射由使用方决定）。无 `utterances` 的旧变体回退到原 `result.text` 路径。
+    **声纹聚类分离的启用条件**（流式文档）：`enable_speaker_info:true` + `ssd_version:"200"` + language 不指定或
+    `zh-CN`。三者缺一（尤其漏 `ssd_version`）会导致**恒定返回单一说话人 "0"**——init 已补齐这三项。若 `bigmodel_async`
+    属于"双向流式优化接口"，可能还需 `enable_nonstream:true`（待实测；现未加，以免打断已跑通的转写）。
   - **鉴权错误友好化**：火山 ASR 握手被拒（`401/403`）由 `asr_volc.friendly_ws_error` 转成「火山 ASR
     鉴权失败：请检查 Key 与 Resource ID」；LLM API 鉴权失败（`401/403`）由 `deepseek_client.friendly_llm_error`
     转成「LLM 鉴权失败：请检查 Key 与 Base URL」——措辞用中性的「LLM」而非写死某家厂商。非鉴权错误原样透传，
